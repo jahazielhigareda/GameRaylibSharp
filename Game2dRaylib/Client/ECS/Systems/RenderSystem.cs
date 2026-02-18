@@ -1,3 +1,5 @@
+using Arch.Core;
+using Arch.Core.Extensions;
 using Client.ECS.Components;
 using Raylib_cs;
 using Shared;
@@ -5,50 +7,45 @@ using Shared;
 namespace Client.ECS.Systems;
 
 /// <summary>
-/// Renderiza entidades visibles dentro del viewport.
-/// Usa el rango de tiles calculado por BackgroundSystem para máxima eficiencia.
+/// Arch-based render system.
+/// Renders all entities with PositionComponent + RenderComponent inside the viewport.
 /// </summary>
 public class RenderSystem : ISystem
 {
-    private readonly World            _world;
-    private readonly BackgroundSystem _backgroundSystem;
+    private readonly ClientWorld      _world;
+    private readonly BackgroundSystem _bg;
 
-    public RenderSystem(World world, BackgroundSystem backgroundSystem)
+    public RenderSystem(ClientWorld world, BackgroundSystem bg)
     {
-        _world            = world;
-        _backgroundSystem = backgroundSystem;
+        _world = world;
+        _bg    = bg;
     }
 
     public void Update(float deltaTime)
     {
-        var (offsetX, offsetY) = _backgroundSystem.GetCameraOffset();
+        var (offsetX, offsetY) = _bg.GetCameraOffset();
         int ts = Constants.TileSize;
 
-        foreach (var entity in _world.GetEntitiesWith<RenderComponent>())
+        _world.ForEachRenderable((Entity entity,
+                                  ref PositionComponent pos,
+                                  ref RenderComponent render) =>
         {
-            var pos    = entity.GetComponent<PositionComponent>();
-            var render = entity.GetComponent<RenderComponent>();
+            // Frustum culling by tile
+            if (pos.TileX < _bg.VisibleMinTileX - 1 ||
+                pos.TileX > _bg.VisibleMaxTileX + 1 ||
+                pos.TileY < _bg.VisibleMinTileY - 1 ||
+                pos.TileY > _bg.VisibleMaxTileY + 1)
+                return;
 
-            // === FRUSTUM CULLING POR TILE ===
-            // Usar el rango exacto calculado por BackgroundSystem
-            // con 1 tile extra de margen para entidades en movimiento entre tiles
-            if (pos.TileX < _backgroundSystem.VisibleMinTileX - 1 ||
-                pos.TileX > _backgroundSystem.VisibleMaxTileX + 1 ||
-                pos.TileY < _backgroundSystem.VisibleMinTileY - 1 ||
-                pos.TileY > _backgroundSystem.VisibleMaxTileY + 1)
-                continue;
-
-            // Centrar el sprite dentro del tile
             int drawX = (int)(pos.X + offsetX + (ts - render.Size) / 2f);
             int drawY = (int)(pos.Y + offsetY + (ts - render.Size) / 2f);
 
             Raylib.DrawRectangle(drawX, drawY, render.Size, render.Size, render.Color);
 
-            // Dibujar borde
+            bool isLocal = entity.Has<LocalPlayerComponent>();
             Raylib.DrawRectangleLines(drawX, drawY, render.Size, render.Size,
-                entity.HasComponent<LocalPlayerComponent>()
-                    ? new Color(100, 100, 255, 255)
-                    : new Color(255, 100, 100, 255));
-        }
+                isLocal ? new Color(100, 100, 255, 255)
+                        : new Color(255, 100, 100, 255));
+        });
     }
 }

@@ -1,6 +1,7 @@
 namespace Server.ECS.Components;
 
-public class NetworkIdComponent
+/// <summary>Arch struct component – network identity.</summary>
+public struct NetworkIdComponent
 {
-    public int Id { get; set; }
+    public int Id;
 }

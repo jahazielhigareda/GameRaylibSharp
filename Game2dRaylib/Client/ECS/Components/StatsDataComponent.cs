@@ -1,21 +1,21 @@
 namespace Client.ECS.Components;
 
-/// <summary>
-/// Almacena los stats recibidos del servidor para mostrar en el HUD.
-/// </summary>
-public class StatsDataComponent
+/// <summary>Arch struct component – stats received from server for HUD display.</summary>
+public struct StatsDataComponent
 {
-    public int   Level       { get; set; } = 1;
-    public long  Experience  { get; set; }
-    public long  ExpToNext   { get; set; }
-    public int   CurrentHP   { get; set; }
-    public int   MaxHP       { get; set; }
-    public int   CurrentMP   { get; set; }
-    public int   MaxMP       { get; set; }
-    public int   Capacity    { get; set; }
-    public int   MaxCapacity { get; set; }
-    public int   Soul        { get; set; }
-    public int   Stamina     { get; set; }
-    public byte  Vocation    { get; set; }
-    public float Speed       { get; set; }
+    public int   Level;
+    public long  Experience;
+    public long  ExpToNext;
+    public int   CurrentHP;
+    public int   MaxHP;
+    public int   CurrentMP;
+    public int   MaxMP;
+    public int   Capacity;
+    public int   MaxCapacity;
+    public int   Soul;
+    public int   Stamina;
+    public byte  Vocation;
+    public float Speed;
+
+    public StatsDataComponent() { Level = 1; }
 }

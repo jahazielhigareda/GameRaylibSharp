@@ -10,7 +10,7 @@ var services = new ServiceCollection();
 
 services.AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
 
-services.AddSingleton<World>();
+services.AddSingleton<ClientWorld>();
 services.AddSingleton<GameStateService>();
 services.AddSingleton<ClientNetworkManager>();
 services.AddSingleton<InputSystem>();
@@ -21,6 +21,4 @@ services.AddSingleton<HudSystem>();
 services.AddSingleton<GameLoop>();
 
 var provider = services.BuildServiceProvider();
-
-var loop = provider.GetRequiredService<GameLoop>();
-loop.Run();
+provider.GetRequiredService<GameLoop>().Run();

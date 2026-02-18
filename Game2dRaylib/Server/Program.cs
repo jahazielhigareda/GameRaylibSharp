@@ -10,7 +10,7 @@ var services = new ServiceCollection();
 
 services.AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
 
-services.AddSingleton<World>();
+services.AddSingleton<ServerWorld>();
 services.AddSingleton<PlayerService>();
 services.AddSingleton<MovementSystem>();
 services.AddSingleton<StatsSystem>();
@@ -19,7 +19,7 @@ services.AddSingleton<GameLoop>();
 
 var provider = services.BuildServiceProvider();
 
-var network  = provider.GetRequiredService<NetworkManager>();
+var network = provider.GetRequiredService<NetworkManager>();
 network.Start();
 
 var cts = new CancellationTokenSource();

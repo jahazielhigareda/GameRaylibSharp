@@ -1,3 +1,4 @@
+using Arch.Core.Extensions;
 using Server.ECS;
 using Server.ECS.Components;
 using Shared;
@@ -7,34 +8,21 @@ namespace Server.Services;
 
 public class PlayerService
 {
-    /// <summary>
-    /// Aplica un MoveRequest: encola la dirección solicitada.
-    /// </summary>
-    public void ApplyMoveRequest(int networkId, MoveRequestPacket request, World world)
+    /// <summary>Applies a move request: queues the requested direction.</summary>
+    public void ApplyMoveRequest(int networkId, MoveRequestPacket request, ServerWorld world)
     {
-        foreach (var entity in world.GetEntitiesWith<NetworkIdComponent>())
-        {
-            if (entity.GetComponent<NetworkIdComponent>().Id != networkId) continue;
+        var entity = world.FindPlayer(networkId);
+        if (entity == Arch.Core.Entity.Null) return;
 
-            var queue = entity.GetComponent<MovementQueueComponent>();
-            var dir   = (Direction)request.Direction;
-
-            if (dir == Direction.None) 
-            {
-                queue.QueuedDirection = null;
-            }
-            else
-            {
-                queue.QueuedDirection = dir;
-            }
-            break;
-        }
+        ref var queue = ref entity.Get<MovementQueueComponent>();
+        var dir = (Direction)request.Direction;
+        queue.QueuedDirection = (byte)dir;
     }
 
-    public void RemovePlayer(int networkId, World world)
+    public void RemovePlayer(int networkId, ServerWorld world)
     {
-        var entity = world.GetEntitiesWith<NetworkIdComponent>()
-            .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == networkId);
-        if (entity != null) world.RemoveEntity(entity);
+        var entity = world.FindPlayer(networkId);
+        if (entity != Arch.Core.Entity.Null)
+            world.DestroyEntity(entity);
     }
 }

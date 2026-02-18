@@ -3,11 +3,19 @@ using Shared;
 namespace Server.ECS.Components;
 
 /// <summary>
-/// Cola de movimiento estilo Tibia.
-/// Solo permite encolar 1 movimiento adelante.
+/// Arch struct component – Tibia-style movement queue (max 1 ahead).
 /// </summary>
-public class MovementQueueComponent
+public struct MovementQueueComponent
 {
-    public Direction? QueuedDirection { get; set; }
-    public Direction  LastDirection   { get; set; } = Direction.South;
+    // 255 = no queued direction (Direction.None)
+    public byte QueuedDirection;
+    public byte LastDirection;
+
+    public MovementQueueComponent()
+    {
+        QueuedDirection = (byte)Direction.None;
+        LastDirection   = (byte)Direction.South;
+    }
+
+    public readonly bool HasQueued => QueuedDirection != (byte)Direction.None;
 }

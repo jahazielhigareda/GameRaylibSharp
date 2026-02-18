@@ -1,9 +1,9 @@
+using Arch.Core.Extensions;
 using LiteNetLib;
 using LiteNetLib.Utils;
 using MessagePack;
 using Microsoft.Extensions.Logging;
 using Client.ECS;
-using Client.ECS.Entities;
 using Client.ECS.Components;
 using Client.Services;
 using Shared;
@@ -14,24 +14,24 @@ namespace Client.Network;
 
 public class ClientNetworkManager : IDisposable
 {
-    private readonly EventBasedNetListener _listener;
-    private readonly NetManager            _netManager;
+    private readonly EventBasedNetListener         _listener;
+    private readonly NetManager                    _netManager;
     private readonly ILogger<ClientNetworkManager> _logger;
-    private readonly World             _world;
-    private readonly GameStateService  _state;
-
+    private readonly ClientWorld                   _world;
+    private readonly GameStateService              _state;
     private NetPeer? _server;
 
-    public ClientNetworkManager(ILogger<ClientNetworkManager> logger, World world, GameStateService state)
+    public ClientNetworkManager(ILogger<ClientNetworkManager> logger,
+                                ClientWorld world, GameStateService state)
     {
-        _logger   = logger;
-        _world    = world;
-        _state    = state;
-        _listener = new EventBasedNetListener();
+        _logger     = logger;
+        _world      = world;
+        _state      = state;
+        _listener   = new EventBasedNetListener();
         _netManager = new NetManager(_listener);
 
-        _listener.PeerConnectedEvent    += OnConnected;
-        _listener.PeerDisconnectedEvent += OnDisconnected;
+        _listener.PeerConnectedEvent    += _ => _logger.LogInformation("Connected to server");
+        _listener.PeerDisconnectedEvent += (_, i) => _logger.LogWarning("Disconnected: {R}", i.Reason);
         _listener.NetworkReceiveEvent   += OnReceive;
     }
 
@@ -39,7 +39,8 @@ public class ClientNetworkManager : IDisposable
     {
         _netManager.Start();
         _server = _netManager.Connect(Constants.ServerAddress, Constants.ServerPort, "");
-        _logger.LogInformation("Connecting to {Address}:{Port}", Constants.ServerAddress, Constants.ServerPort);
+        _logger.LogInformation("Connecting to {Address}:{Port}",
+            Constants.ServerAddress, Constants.ServerPort);
     }
 
     public void PollEvents() => _netManager.PollEvents();
@@ -52,40 +53,20 @@ public class ClientNetworkManager : IDisposable
         _server.Send(writer, DeliveryMethod.ReliableOrdered);
     }
 
-    private void OnConnected(NetPeer peer)
-        => _logger.LogInformation("Connected to server");
-
-    private void OnDisconnected(NetPeer peer, DisconnectInfo info)
-        => _logger.LogWarning("Disconnected: {Reason}", info.Reason);
-
-    private void OnReceive(NetPeer peer, NetPacketReader reader, byte channel, DeliveryMethod delivery)
+    private void OnReceive(NetPeer peer, NetPacketReader reader,
+                           byte channel, DeliveryMethod delivery)
     {
         var data = reader.GetRemainingBytes();
         reader.Recycle();
-
         var (type, payload) = PacketSerializer.Deserialize(data);
 
         switch (type)
         {
-            case PacketType.JoinAcceptedPacket:
-                HandleJoinAccepted(payload);
-                break;
-
-            case PacketType.WorldStatePacket:
-                HandleWorldState(payload);
-                break;
-
-            case PacketType.PlayerDisconnectedPacket:
-                HandlePlayerDisconnected(payload);
-                break;
-
-            case PacketType.StatsUpdatePacket:
-                HandleStatsUpdate(payload);
-                break;
-
-            case PacketType.SkillsUpdatePacket:
-                HandleSkillsUpdate(payload);
-                break;
+            case PacketType.JoinAcceptedPacket:      HandleJoinAccepted(payload);      break;
+            case PacketType.WorldStatePacket:        HandleWorldState(payload);        break;
+            case PacketType.PlayerDisconnectedPacket:HandlePlayerDisconnected(payload);break;
+            case PacketType.StatsUpdatePacket:       HandleStatsUpdate(payload);       break;
+            case PacketType.SkillsUpdatePacket:      HandleSkillsUpdate(payload);      break;
         }
     }
 
@@ -93,8 +74,7 @@ public class ClientNetworkManager : IDisposable
     {
         var join = MessagePackSerializer.Deserialize<JoinAcceptedPacket>(payload);
         _state.LocalId = join.AssignedId;
-        var localPlayer = new PlayerEntity(join.AssignedId, true);
-        _world.AddEntity(localPlayer);
+        _world.SpawnPlayer(join.AssignedId, isLocal: true);
         _logger.LogInformation("Assigned ID: {Id}", join.AssignedId);
     }
 
@@ -105,46 +85,39 @@ public class ClientNetworkManager : IDisposable
 
         foreach (var snap in ws.Players)
         {
-            var entity = _world.GetEntitiesWith<NetworkIdComponent>()
-                .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == snap.Id);
+            var entity = _world.FindPlayer(snap.Id);
 
-            if (entity == null)
+            if (entity == Arch.Core.Entity.Null)
             {
-                var remote = new PlayerEntity(snap.Id, snap.Id == _state.LocalId);
-                _world.AddEntity(remote);
-                entity = remote;
-
-                var newPos = entity.GetComponent<PositionComponent>();
+                entity = _world.SpawnPlayer(snap.Id, snap.Id == _state.LocalId);
+                ref var newPos = ref entity.Get<PositionComponent>();
                 newPos.SetFromServer(snap.TileX, snap.TileY, snap.X, snap.Y);
                 newPos.SnapToTarget();
                 continue;
             }
 
-            var pos = entity.GetComponent<PositionComponent>();
+            ref var pos = ref entity.Get<PositionComponent>();
             pos.SetFromServer(snap.TileX, snap.TileY, snap.X, snap.Y);
         }
     }
 
     private void HandlePlayerDisconnected(byte[] payload)
     {
-        var disc = MessagePackSerializer.Deserialize<PlayerDisconnectedPacket>(payload);
-        var toRemove = _world.GetEntitiesWith<NetworkIdComponent>()
-            .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == disc.Id);
-        if (toRemove != null) _world.RemoveEntity(toRemove);
+        var disc   = MessagePackSerializer.Deserialize<PlayerDisconnectedPacket>(payload);
+        var entity = _world.FindPlayer(disc.Id);
+        if (entity != Arch.Core.Entity.Null) _world.DestroyEntity(entity);
         _logger.LogInformation("Player {Id} left", disc.Id);
     }
 
     private void HandleStatsUpdate(byte[] payload)
     {
         var stats = MessagePackSerializer.Deserialize<StatsUpdatePacket>(payload);
-
-        // Solo aplicar al jugador local
         if (stats.PlayerId != _state.LocalId) return;
 
-        var localPlayer = _world.GetEntitiesWith<LocalPlayerComponent>().FirstOrDefault();
-        if (localPlayer == null || !localPlayer.HasComponent<StatsDataComponent>()) return;
+        if (!_world.TryGetLocalPlayer(out var local)) return;
+        if (!local.Has<StatsDataComponent>()) return;
 
-        var data = localPlayer.GetComponent<StatsDataComponent>();
+        ref var data = ref local.Get<StatsDataComponent>();
         data.Level       = stats.Level;
         data.Experience  = stats.Experience;
         data.ExpToNext   = stats.ExpToNext;
@@ -163,29 +136,28 @@ public class ClientNetworkManager : IDisposable
     private void HandleSkillsUpdate(byte[] payload)
     {
         var skills = MessagePackSerializer.Deserialize<SkillsUpdatePacket>(payload);
-
         if (skills.PlayerId != _state.LocalId) return;
 
-        var localPlayer = _world.GetEntitiesWith<LocalPlayerComponent>().FirstOrDefault();
-        if (localPlayer == null || !localPlayer.HasComponent<SkillsDataComponent>()) return;
+        if (!_world.TryGetLocalPlayer(out var local)) return;
+        if (!local.Has<SkillsDataComponent>()) return;
 
-        var data = localPlayer.GetComponent<SkillsDataComponent>();
-        data.FistLevel       = skills.FistLevel;
-        data.FistPercent     = skills.FistPercent;
-        data.ClubLevel       = skills.ClubLevel;
-        data.ClubPercent     = skills.ClubPercent;
-        data.SwordLevel      = skills.SwordLevel;
-        data.SwordPercent    = skills.SwordPercent;
-        data.AxeLevel        = skills.AxeLevel;
-        data.AxePercent      = skills.AxePercent;
-        data.DistanceLevel   = skills.DistanceLevel;
-        data.DistancePercent = skills.DistancePercent;
-        data.ShieldingLevel  = skills.ShieldingLevel;
+        ref var data = ref local.Get<SkillsDataComponent>();
+        data.FistLevel        = skills.FistLevel;
+        data.FistPercent      = skills.FistPercent;
+        data.ClubLevel        = skills.ClubLevel;
+        data.ClubPercent      = skills.ClubPercent;
+        data.SwordLevel       = skills.SwordLevel;
+        data.SwordPercent     = skills.SwordPercent;
+        data.AxeLevel         = skills.AxeLevel;
+        data.AxePercent       = skills.AxePercent;
+        data.DistanceLevel    = skills.DistanceLevel;
+        data.DistancePercent  = skills.DistancePercent;
+        data.ShieldingLevel   = skills.ShieldingLevel;
         data.ShieldingPercent = skills.ShieldingPercent;
-        data.FishingLevel    = skills.FishingLevel;
-        data.FishingPercent  = skills.FishingPercent;
-        data.MagicLevel      = skills.MagicLevel;
-        data.MagicPercent    = skills.MagicPercent;
+        data.FishingLevel     = skills.FishingLevel;
+        data.FishingPercent   = skills.FishingPercent;
+        data.MagicLevel       = skills.MagicLevel;
+        data.MagicPercent     = skills.MagicPercent;
     }
 
     public void Dispose() => _netManager.Stop();

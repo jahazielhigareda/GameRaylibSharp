@@ -8,16 +8,16 @@ namespace Client.Core;
 
 public class GameLoop
 {
-    private readonly World                  _world;
-    private readonly ClientNetworkManager   _network;
-    private readonly InputSystem            _inputSystem;
-    private readonly InterpolationSystem    _interpolationSystem;
-    private readonly RenderSystem           _renderSystem;
-    private readonly HudSystem              _hudSystem;
-    private readonly BackgroundSystem       _backgroundSystem;
+    private readonly ClientWorld          _world;
+    private readonly ClientNetworkManager _network;
+    private readonly InputSystem          _inputSystem;
+    private readonly InterpolationSystem  _interpolationSystem;
+    private readonly RenderSystem         _renderSystem;
+    private readonly HudSystem            _hudSystem;
+    private readonly BackgroundSystem     _backgroundSystem;
 
     public GameLoop(
-        World world,
+        ClientWorld world,
         ClientNetworkManager network,
         InputSystem inputSystem,
         InterpolationSystem interpolationSystem,
@@ -36,7 +36,7 @@ public class GameLoop
 
     public void Run()
     {
-        Raylib.InitWindow(800, 600, "Game2dRaylib - Tibia Movement");
+        Raylib.InitWindow(800, 600, "Game2dRaylib - Tibia Movement [Arch ECS]");
         Raylib.SetTargetFPS(Constants.TickRate);
 
         _network.Connect();
@@ -60,5 +60,6 @@ public class GameLoop
         }
 
         Raylib.CloseWindow();
+        _world.Dispose();
     }
 }

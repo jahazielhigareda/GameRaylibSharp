@@ -1,3 +1,4 @@
 namespace Client.ECS.Components;
 
-public class LocalPlayerComponent { }
+/// <summary>Tag: this entity is the locally controlled player.</summary>
+public struct LocalPlayerComponent { }

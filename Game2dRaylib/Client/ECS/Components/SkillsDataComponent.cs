@@ -1,24 +1,14 @@
 namespace Client.ECS.Components;
 
-/// <summary>
-/// Almacena los skills recibidos del servidor para mostrar en el HUD.
-/// </summary>
-public class SkillsDataComponent
+/// <summary>Arch struct component – skills received from server for HUD display.</summary>
+public struct SkillsDataComponent
 {
-    public int FistLevel       { get; set; }
-    public int FistPercent     { get; set; }
-    public int ClubLevel       { get; set; }
-    public int ClubPercent     { get; set; }
-    public int SwordLevel      { get; set; }
-    public int SwordPercent    { get; set; }
-    public int AxeLevel        { get; set; }
-    public int AxePercent      { get; set; }
-    public int DistanceLevel   { get; set; }
-    public int DistancePercent { get; set; }
-    public int ShieldingLevel  { get; set; }
-    public int ShieldingPercent { get; set; }
-    public int FishingLevel    { get; set; }
-    public int FishingPercent  { get; set; }
-    public int MagicLevel      { get; set; }
-    public int MagicPercent    { get; set; }
+    public int FistLevel;       public int FistPercent;
+    public int ClubLevel;       public int ClubPercent;
+    public int SwordLevel;      public int SwordPercent;
+    public int AxeLevel;        public int AxePercent;
+    public int DistanceLevel;   public int DistancePercent;
+    public int ShieldingLevel;  public int ShieldingPercent;
+    public int FishingLevel;    public int FishingPercent;
+    public int MagicLevel;      public int MagicPercent;
 }

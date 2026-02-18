@@ -1,27 +1,21 @@
 namespace Client.ECS.Components;
 
 /// <summary>
-/// Posición del jugador en el cliente.
-/// Incluye posición lógica (tiles) y visual (píxeles con interpolación).
+/// Arch struct component – client-side position with smooth interpolation.
 /// </summary>
-public class PositionComponent
+public struct PositionComponent
 {
-    // Posición lógica en tiles (recibida del servidor)
-    public int TileX { get; set; }
-    public int TileY { get; set; }
+    public int   TileX;
+    public int   TileY;
 
-    // Posición visual en píxeles (interpolada suavemente)
-    public float X { get; set; }
-    public float Y { get; set; }
+    // Visual (pixel) positions
+    public float X;
+    public float Y;
+    public float TargetX;
+    public float TargetY;
+    public float LerpSpeed;
 
-    // Posición visual objetivo
-    public float TargetX { get; set; }
-    public float TargetY { get; set; }
-
-    /// <summary>
-    /// Velocidad de interpolación visual. Mayor = más rápido alcanza el target.
-    /// </summary>
-    public float LerpSpeed { get; set; } = 10f;
+    public PositionComponent() { LerpSpeed = 10f; }
 
     public void SetFromServer(int tileX, int tileY, float serverX, float serverY)
     {
@@ -31,18 +25,8 @@ public class PositionComponent
         TargetY = serverY;
     }
 
-    /// <summary>
-    /// Snap inmediato (para la primera vez o teleport).
-    /// </summary>
-    public void SnapToTarget()
-    {
-        X = TargetX;
-        Y = TargetY;
-    }
+    public void SnapToTarget() { X = TargetX; Y = TargetY; }
 
-    /// <summary>
-    /// Interpola suavemente hacia la posición objetivo.
-    /// </summary>
     public void Interpolate(float deltaTime)
     {
         float t = MathF.Min(1f, LerpSpeed * deltaTime);
