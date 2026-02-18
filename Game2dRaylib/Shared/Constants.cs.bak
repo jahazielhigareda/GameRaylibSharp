@@ -17,11 +17,6 @@ public static class Constants
     public const int    MapWidth       = 50;
     public const int    MapHeight      = 38;
 
-    // Frustum Culling (Tibia-style viewport)
-    public const int ViewportTilesX = 15;  // Tiles visibles horizontalmente
-    public const int ViewportTilesY = 11;  // Tiles visibles verticalmente
-    public const int ViewportMargin = 2;   // Margen extra para pre-renderizar
-
     // ========== STATS SYSTEM (Tibia-style) ==========
 
     // Nivel inicial y máximo

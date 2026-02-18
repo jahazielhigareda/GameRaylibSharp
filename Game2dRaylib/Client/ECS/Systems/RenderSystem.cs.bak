@@ -4,10 +4,6 @@ using Shared;
 
 namespace Client.ECS.Systems;
 
-/// <summary>
-/// Renderiza entidades visibles dentro del viewport.
-/// Usa el rango de tiles calculado por BackgroundSystem para máxima eficiencia.
-/// </summary>
 public class RenderSystem : ISystem
 {
     private readonly World            _world;
@@ -29,22 +25,13 @@ public class RenderSystem : ISystem
             var pos    = entity.GetComponent<PositionComponent>();
             var render = entity.GetComponent<RenderComponent>();
 
-            // === FRUSTUM CULLING POR TILE ===
-            // Usar el rango exacto calculado por BackgroundSystem
-            // con 1 tile extra de margen para entidades en movimiento entre tiles
-            if (pos.TileX < _backgroundSystem.VisibleMinTileX - 1 ||
-                pos.TileX > _backgroundSystem.VisibleMaxTileX + 1 ||
-                pos.TileY < _backgroundSystem.VisibleMinTileY - 1 ||
-                pos.TileY > _backgroundSystem.VisibleMaxTileY + 1)
-                continue;
-
             // Centrar el sprite dentro del tile
             int drawX = (int)(pos.X + offsetX + (ts - render.Size) / 2f);
             int drawY = (int)(pos.Y + offsetY + (ts - render.Size) / 2f);
 
             Raylib.DrawRectangle(drawX, drawY, render.Size, render.Size, render.Color);
 
-            // Dibujar borde
+            // Dibujar borde para mejor visibilidad
             Raylib.DrawRectangleLines(drawX, drawY, render.Size, render.Size,
                 entity.HasComponent<LocalPlayerComponent>()
                     ? new Color(100, 100, 255, 255)
