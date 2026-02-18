@@ -7,12 +7,13 @@ namespace Client.ECS.Systems;
 
 /// <summary>
 /// Tibia-style input system – 8-directional, key-repeat, sends MoveRequestPacket.
-/// (No Arch usage needed – purely input → network.)
+/// The MoveRequestPacket.Sequence field is stamped by
+/// ClientNetworkManager.SendMoveRequest, so this system does not manage it.
 /// </summary>
 public class InputSystem : ISystem
 {
     private readonly ClientNetworkManager _network;
-    private int _tick;
+    private int       _tick;
     private Direction _lastSentDirection = Direction.None;
     private float     _repeatTimer;
     private const float RepeatInterval = 0.08f;
@@ -51,20 +52,25 @@ public class InputSystem : ISystem
         bool left  = Raylib.IsKeyDown(KeyboardKey.A) || Raylib.IsKeyDown(KeyboardKey.Left);
         bool right = Raylib.IsKeyDown(KeyboardKey.D) || Raylib.IsKeyDown(KeyboardKey.Right);
 
-        if (up && down)    { up = down = false; }
+        if (up   && down)  { up   = down  = false; }
         if (left && right) { left = right = false; }
 
-        if (up && right) return Direction.NorthEast;
-        if (up && left)  return Direction.NorthWest;
+        if (up   && right) return Direction.NorthEast;
+        if (up   && left)  return Direction.NorthWest;
         if (down && right) return Direction.SouthEast;
         if (down && left)  return Direction.SouthWest;
-        if (up)    return Direction.North;
-        if (down)  return Direction.South;
-        if (left)  return Direction.West;
-        if (right) return Direction.East;
+        if (up)            return Direction.North;
+        if (down)          return Direction.South;
+        if (left)          return Direction.West;
+        if (right)         return Direction.East;
         return Direction.None;
     }
 
     private void SendMoveRequest(Direction dir)
-        => _network.SendMoveRequest(new MoveRequestPacket { Direction = (byte)dir, Tick = _tick++ });
+        => _network.SendMoveRequest(new MoveRequestPacket
+        {
+            Direction = (byte)dir,
+            Tick      = _tick++
+            // Sequence is stamped inside ClientNetworkManager.SendMoveRequest
+        });
 }

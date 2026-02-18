@@ -1,7 +1,6 @@
 using Arch.Core.Extensions;
 using LiteNetLib;
 using LiteNetLib.Utils;
-using MessagePack;
 using Microsoft.Extensions.Logging;
 using Client.ECS;
 using Client.ECS.Components;
@@ -12,6 +11,14 @@ using Shared.Packets;
 
 namespace Client.Network;
 
+/// <summary>
+/// Client-side LiteNetLib manager.
+///
+/// Changes vs. original:
+/// - Parses full 5-byte framed NetworkPacket headers.
+/// - Handles both WorldStatePacket (full) and WorldDeltaPacket (delta).
+/// - Stamps outbound MoveRequest packets with a monotonic ushort sequence number.
+/// </summary>
 public class ClientNetworkManager : IDisposable
 {
     private readonly EventBasedNetListener         _listener;
@@ -20,6 +27,9 @@ public class ClientNetworkManager : IDisposable
     private readonly ClientWorld                   _world;
     private readonly GameStateService              _state;
     private NetPeer? _server;
+
+    // Monotonic outbound sequence counter – wraps naturally as ushort.
+    private ushort _moveSequence;
 
     public ClientNetworkManager(ILogger<ClientNetworkManager> logger,
                                 ClientWorld world, GameStateService state)
@@ -45,45 +55,100 @@ public class ClientNetworkManager : IDisposable
 
     public void PollEvents() => _netManager.PollEvents();
 
+    // ── Outbound ──────────────────────────────────────────────────────────
+
     public void SendMoveRequest(MoveRequestPacket packet)
     {
         if (_server == null) return;
+
+        packet.Sequence = _moveSequence++;   // stamp sequence before sending
+
+        var data   = PacketSerializer.Serialize(packet);
         var writer = new NetDataWriter();
-        writer.Put(PacketSerializer.Serialize(packet));
+        writer.Put(data);
         _server.Send(writer, DeliveryMethod.ReliableOrdered);
     }
+
+    // ── Inbound ───────────────────────────────────────────────────────────
 
     private void OnReceive(NetPeer peer, NetPacketReader reader,
                            byte channel, DeliveryMethod delivery)
     {
         var data = reader.GetRemainingBytes();
         reader.Recycle();
-        var (type, payload) = PacketSerializer.Deserialize(data);
 
-        switch (type)
+        NetworkPacket packet;
+        try
         {
-            case PacketType.JoinAcceptedPacket:      HandleJoinAccepted(payload);      break;
-            case PacketType.WorldStatePacket:        HandleWorldState(payload);        break;
-            case PacketType.PlayerDisconnectedPacket:HandlePlayerDisconnected(payload);break;
-            case PacketType.StatsUpdatePacket:       HandleStatsUpdate(payload);       break;
-            case PacketType.SkillsUpdatePacket:      HandleSkillsUpdate(payload);      break;
+            packet = PacketSerializer.ParsePacket(data);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Malformed packet from server: {Ex}", ex.Message);
+            return;
+        }
+
+        switch (packet.Type)
+        {
+            case PacketType.JoinAcceptedPacket:       HandleJoinAccepted(packet);       break;
+            case PacketType.WorldStatePacket:         HandleWorldStateFull(packet);     break;
+            case PacketType.WorldDeltaPacket:         HandleWorldStateDelta(packet);    break;
+            case PacketType.PlayerDisconnectedPacket: HandlePlayerDisconnected(packet); break;
+            case PacketType.StatsUpdatePacket:        HandleStatsUpdate(packet);        break;
+            case PacketType.SkillsUpdatePacket:       HandleSkillsUpdate(packet);       break;
         }
     }
 
-    private void HandleJoinAccepted(byte[] payload)
+    // ── Handlers ──────────────────────────────────────────────────────────
+
+    private void HandleJoinAccepted(NetworkPacket packet)
     {
-        var join = MessagePackSerializer.Deserialize<JoinAcceptedPacket>(payload);
+        var join = PacketSerializer.ParsePacket<JoinAcceptedPacket>(packet);
         _state.LocalId = join.AssignedId;
         _world.SpawnPlayer(join.AssignedId, isLocal: true);
         _logger.LogInformation("Assigned ID: {Id}", join.AssignedId);
     }
 
-    private void HandleWorldState(byte[] payload)
+    private void HandleWorldStateFull(NetworkPacket packet)
     {
-        var ws = MessagePackSerializer.Deserialize<WorldStatePacket>(payload);
+        var ws = PacketSerializer.ParsePacket<WorldStatePacket>(packet);
         _state.Tick = ws.Tick;
+        ApplyFullSnapshot(ws.Players);
+    }
 
-        foreach (var snap in ws.Players)
+    private void HandleWorldStateDelta(NetworkPacket packet)
+    {
+        var delta = PacketSerializer.ParsePacket<WorldDeltaPacket>(packet);
+        _state.Tick = delta.Tick;
+
+        // Apply additions as full snapshots
+        if (delta.Added.Count > 0)
+            ApplyFullSnapshot(delta.Added);
+
+        // Merge updated fields into existing entities
+        foreach (var d in delta.Updated)
+        {
+            var entity = _world.FindPlayer(d.Id);
+            if (entity == Arch.Core.Entity.Null) continue;
+
+            ref var pos = ref entity.Get<PositionComponent>();
+            if (d.TileX.HasValue) pos.TileX   = d.TileX.Value;
+            if (d.TileY.HasValue) pos.TileY   = d.TileY.Value;
+            if (d.X.HasValue)     pos.TargetX = d.X.Value;
+            if (d.Y.HasValue)     pos.TargetY = d.Y.Value;
+        }
+
+        // Remove departed players
+        foreach (var id in delta.Removed)
+        {
+            var entity = _world.FindPlayer(id);
+            if (entity != Arch.Core.Entity.Null) _world.DestroyEntity(entity);
+        }
+    }
+
+    private void ApplyFullSnapshot(List<PlayerSnapshot> players)
+    {
+        foreach (var snap in players)
         {
             var entity = _world.FindPlayer(snap.Id);
 
@@ -101,17 +166,17 @@ public class ClientNetworkManager : IDisposable
         }
     }
 
-    private void HandlePlayerDisconnected(byte[] payload)
+    private void HandlePlayerDisconnected(NetworkPacket packet)
     {
-        var disc   = MessagePackSerializer.Deserialize<PlayerDisconnectedPacket>(payload);
+        var disc   = PacketSerializer.ParsePacket<PlayerDisconnectedPacket>(packet);
         var entity = _world.FindPlayer(disc.Id);
         if (entity != Arch.Core.Entity.Null) _world.DestroyEntity(entity);
         _logger.LogInformation("Player {Id} left", disc.Id);
     }
 
-    private void HandleStatsUpdate(byte[] payload)
+    private void HandleStatsUpdate(NetworkPacket packet)
     {
-        var stats = MessagePackSerializer.Deserialize<StatsUpdatePacket>(payload);
+        var stats = PacketSerializer.ParsePacket<StatsUpdatePacket>(packet);
         if (stats.PlayerId != _state.LocalId) return;
 
         if (!_world.TryGetLocalPlayer(out var local)) return;
@@ -133,9 +198,9 @@ public class ClientNetworkManager : IDisposable
         data.Speed       = stats.Speed;
     }
 
-    private void HandleSkillsUpdate(byte[] payload)
+    private void HandleSkillsUpdate(NetworkPacket packet)
     {
-        var skills = MessagePackSerializer.Deserialize<SkillsUpdatePacket>(payload);
+        var skills = PacketSerializer.ParsePacket<SkillsUpdatePacket>(packet);
         if (skills.PlayerId != _state.LocalId) return;
 
         if (!_world.TryGetLocalPlayer(out var local)) return;

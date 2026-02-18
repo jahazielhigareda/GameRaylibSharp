@@ -6,9 +6,13 @@ using Shared.Packets;
 
 namespace Server.Services;
 
+/// <summary>
+/// Applies validated, sequenced player inputs to the ECS world.
+/// Sequence validation is performed upstream in NetworkManager.
+/// </summary>
 public class PlayerService
 {
-    /// <summary>Applies a move request: queues the requested direction.</summary>
+    /// <summary>Queues the requested direction from a MoveRequestPacket.</summary>
     public void ApplyMoveRequest(int networkId, MoveRequestPacket request, ServerWorld world)
     {
         var entity = world.FindPlayer(networkId);
