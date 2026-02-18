@@ -1,22 +1,32 @@
 using Server.ECS;
 using Server.ECS.Components;
+using Shared;
 using Shared.Packets;
 
 namespace Server.Services;
 
 public class PlayerService
 {
-    public void ApplyInput(int networkId, InputPacket input, World world)
+    /// <summary>
+    /// Aplica un MoveRequest: encola la dirección solicitada.
+    /// </summary>
+    public void ApplyMoveRequest(int networkId, MoveRequestPacket request, World world)
     {
         foreach (var entity in world.GetEntitiesWith<NetworkIdComponent>())
         {
             if (entity.GetComponent<NetworkIdComponent>().Id != networkId) continue;
-            var ic    = entity.GetComponent<InputComponent>();
-            ic.Up     = input.Up;
-            ic.Down   = input.Down;
-            ic.Left   = input.Left;
-            ic.Right  = input.Right;
-            ic.Tick   = input.Tick;
+
+            var queue = entity.GetComponent<MovementQueueComponent>();
+            var dir   = (Direction)request.Direction;
+
+            if (dir == Direction.None) 
+            {
+                queue.QueuedDirection = null;
+            }
+            else
+            {
+                queue.QueuedDirection = dir;
+            }
             break;
         }
     }

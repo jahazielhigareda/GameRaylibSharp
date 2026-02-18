@@ -1,15 +1,18 @@
 using Server.ECS.Components;
-using Server.ECS.Entities;
 
 namespace Server.ECS.Entities;
 
 public class PlayerEntity : Entity
 {
-    public PlayerEntity(int networkId, float startX, float startY)
+    public PlayerEntity(int networkId, int startTileX, int startTileY)
     {
         AddComponent(new NetworkIdComponent { Id = networkId });
-        AddComponent(new PositionComponent  { X = startX, Y = startY });
-        AddComponent(new VelocityComponent  { Vx = 0, Vy = 0 });
-        AddComponent(new InputComponent());
+
+        var pos = new PositionComponent();
+        pos.SetTilePosition(startTileX, startTileY);
+        AddComponent(pos);
+
+        AddComponent(new SpeedComponent());
+        AddComponent(new MovementQueueComponent());
     }
 }

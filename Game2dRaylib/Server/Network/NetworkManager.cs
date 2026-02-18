@@ -7,6 +7,7 @@ using Server.ECS.Entities;
 using Server.ECS.Components;
 using Server.Services;
 using Shared;
+using Shared.Network;
 using Shared.Packets;
 
 namespace Server.Network;
@@ -19,8 +20,8 @@ public class NetworkManager : IDisposable
     private readonly World               _world;
     private readonly PlayerService       _playerService;
 
-    private readonly Dictionary<int, NetPeer> _peers = new();   // networkId -> peer
-    private readonly Dictionary<int, int>     _peerToNetId = new(); // peerId -> networkId
+    private readonly Dictionary<int, NetPeer> _peers = new();
+    private readonly Dictionary<int, int>     _peerToNetId = new();
     private int _nextNetworkId = 1;
 
     public NetworkManager(ILogger<NetworkManager> logger, World world, PlayerService playerService)
@@ -50,15 +51,17 @@ public class NetworkManager : IDisposable
     private void OnPeerConnected(NetPeer peer)
     {
         int netId = _nextNetworkId++;
-        _peers[netId]            = peer;
-        _peerToNetId[peer.Id]    = netId;
+        _peers[netId]         = peer;
+        _peerToNetId[peer.Id] = netId;
 
-        var player = new PlayerEntity(netId, 400f, 300f);
+        // Spawn en el centro del mapa
+        int spawnX = Constants.MapWidth / 2;
+        int spawnY = Constants.MapHeight / 2;
+        var player = new PlayerEntity(netId, spawnX, spawnY);
         _world.AddEntity(player);
 
         _logger.LogInformation("Player {NetId} connected (PeerId={PeerId})", netId, peer.Id);
 
-        // Send JoinAccepted
         var accepted = PacketSerializer.Serialize(new JoinAcceptedPacket { AssignedId = netId });
         var writer   = new NetDataWriter();
         writer.Put(accepted);
@@ -75,7 +78,7 @@ public class NetworkManager : IDisposable
 
         _logger.LogInformation("Player {NetId} disconnected", netId);
 
-        var pkt    = PacketSerializer.Serialize(new PlayerDisconnectedPacket { Id = netId });
+        var pkt = PacketSerializer.Serialize(new PlayerDisconnectedPacket { Id = netId });
         BroadcastReliable(pkt);
     }
 
@@ -86,11 +89,17 @@ public class NetworkManager : IDisposable
 
         var (type, payload) = PacketSerializer.Deserialize(data);
 
-        if (type == PacketType.InputPacket)
+        switch (type)
         {
-            if (!_peerToNetId.TryGetValue(peer.Id, out int netId)) return;
-            var input = MessagePackSerializer.Deserialize<InputPacket>(payload);
-            _playerService.ApplyInput(netId, input, _world);
+            case PacketType.MoveRequestPacket:
+                if (!_peerToNetId.TryGetValue(peer.Id, out int netId)) return;
+                var moveReq = MessagePackSerializer.Deserialize<MoveRequestPacket>(payload);
+                _playerService.ApplyMoveRequest(netId, moveReq, _world);
+                break;
+
+            // Mantener compatibilidad con InputPacket si se necesita
+            case PacketType.InputPacket:
+                break;
         }
     }
 

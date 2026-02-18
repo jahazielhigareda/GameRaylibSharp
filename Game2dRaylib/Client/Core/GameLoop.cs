@@ -8,32 +8,35 @@ namespace Client.Core;
 
 public class GameLoop
 {
-    private readonly World                _world;
-    private readonly ClientNetworkManager _network;
-    private readonly InputSystem          _inputSystem;
-    private readonly RenderSystem         _renderSystem;
-    private readonly HudSystem            _hudSystem;
-    private readonly BackgroundSystem     _backgroundSystem;
+    private readonly World                  _world;
+    private readonly ClientNetworkManager   _network;
+    private readonly InputSystem            _inputSystem;
+    private readonly InterpolationSystem    _interpolationSystem;
+    private readonly RenderSystem           _renderSystem;
+    private readonly HudSystem              _hudSystem;
+    private readonly BackgroundSystem       _backgroundSystem;
 
     public GameLoop(
         World world,
         ClientNetworkManager network,
         InputSystem inputSystem,
+        InterpolationSystem interpolationSystem,
         RenderSystem renderSystem,
         HudSystem hudSystem,
         BackgroundSystem backgroundSystem)
     {
-        _world            = world;
-        _network          = network;
-        _inputSystem      = inputSystem;
-        _renderSystem     = renderSystem;
-        _hudSystem        = hudSystem;
-        _backgroundSystem = backgroundSystem;
+        _world               = world;
+        _network             = network;
+        _inputSystem         = inputSystem;
+        _interpolationSystem = interpolationSystem;
+        _renderSystem        = renderSystem;
+        _hudSystem           = hudSystem;
+        _backgroundSystem    = backgroundSystem;
     }
 
     public void Run()
     {
-        Raylib.InitWindow(800, 600, "Game2dRaylib - Client");
+        Raylib.InitWindow(800, 600, "Game2dRaylib - Tibia Movement");
         Raylib.SetTargetFPS(Constants.TickRate);
 
         _network.Connect();
@@ -44,6 +47,7 @@ public class GameLoop
 
             _network.PollEvents();
             _inputSystem.Update(dt);
+            _interpolationSystem.Update(dt);
 
             Raylib.BeginDrawing();
             Raylib.ClearBackground(Color.DarkGray);

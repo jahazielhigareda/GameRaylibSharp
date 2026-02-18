@@ -7,6 +7,7 @@ using Client.ECS.Entities;
 using Client.ECS.Components;
 using Client.Services;
 using Shared;
+using Shared.Network;
 using Shared.Packets;
 
 namespace Client.Network;
@@ -43,12 +44,12 @@ public class ClientNetworkManager : IDisposable
 
     public void PollEvents() => _netManager.PollEvents();
 
-    public void SendInput(InputPacket input)
+    public void SendMoveRequest(MoveRequestPacket packet)
     {
         if (_server == null) return;
         var writer = new NetDataWriter();
-        writer.Put(PacketSerializer.Serialize(input));
-        _server.Send(writer, DeliveryMethod.Unreliable);
+        writer.Put(PacketSerializer.Serialize(packet));
+        _server.Send(writer, DeliveryMethod.ReliableOrdered);
     }
 
     private void OnConnected(NetPeer peer)
@@ -67,43 +68,63 @@ public class ClientNetworkManager : IDisposable
         switch (type)
         {
             case PacketType.JoinAcceptedPacket:
-                var join = MessagePackSerializer.Deserialize<JoinAcceptedPacket>(payload);
-                _state.LocalId = join.AssignedId;
-                var localPlayer = new PlayerEntity(join.AssignedId, true);
-                _world.AddEntity(localPlayer);
-                _logger.LogInformation("Assigned ID: {Id}", join.AssignedId);
+                HandleJoinAccepted(payload);
                 break;
 
             case PacketType.WorldStatePacket:
-                var ws = MessagePackSerializer.Deserialize<WorldStatePacket>(payload);
-                _state.Tick = ws.Tick;
-                foreach (var snap in ws.Players)
-                {
-                    var entity = _world.GetEntitiesWith<NetworkIdComponent>()
-                        .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == snap.Id);
-
-                    if (entity == null)
-                    {
-                        // Remote player not yet known
-                        var remote = new PlayerEntity(snap.Id, snap.Id == _state.LocalId);
-                        _world.AddEntity(remote);
-                        entity = remote;
-                    }
-
-                    var pos = entity.GetComponent<PositionComponent>();
-                    pos.X   = snap.X;
-                    pos.Y   = snap.Y;
-                }
+                HandleWorldState(payload);
                 break;
 
             case PacketType.PlayerDisconnectedPacket:
-                var disc = MessagePackSerializer.Deserialize<PlayerDisconnectedPacket>(payload);
-                var toRemove = _world.GetEntitiesWith<NetworkIdComponent>()
-                    .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == disc.Id);
-                if (toRemove != null) _world.RemoveEntity(toRemove);
-                _logger.LogInformation("Player {Id} left", disc.Id);
+                HandlePlayerDisconnected(payload);
                 break;
         }
+    }
+
+    private void HandleJoinAccepted(byte[] payload)
+    {
+        var join = MessagePackSerializer.Deserialize<JoinAcceptedPacket>(payload);
+        _state.LocalId = join.AssignedId;
+        var localPlayer = new PlayerEntity(join.AssignedId, true);
+        _world.AddEntity(localPlayer);
+        _logger.LogInformation("Assigned ID: {Id}", join.AssignedId);
+    }
+
+    private void HandleWorldState(byte[] payload)
+    {
+        var ws = MessagePackSerializer.Deserialize<WorldStatePacket>(payload);
+        _state.Tick = ws.Tick;
+
+        foreach (var snap in ws.Players)
+        {
+            var entity = _world.GetEntitiesWith<NetworkIdComponent>()
+                .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == snap.Id);
+
+            if (entity == null)
+            {
+                var remote = new PlayerEntity(snap.Id, snap.Id == _state.LocalId);
+                _world.AddEntity(remote);
+                entity = remote;
+
+                // Snap inmediato para la primera posición
+                var newPos = entity.GetComponent<PositionComponent>();
+                newPos.SetFromServer(snap.TileX, snap.TileY, snap.X, snap.Y);
+                newPos.SnapToTarget();
+                continue;
+            }
+
+            var pos = entity.GetComponent<PositionComponent>();
+            pos.SetFromServer(snap.TileX, snap.TileY, snap.X, snap.Y);
+        }
+    }
+
+    private void HandlePlayerDisconnected(byte[] payload)
+    {
+        var disc = MessagePackSerializer.Deserialize<PlayerDisconnectedPacket>(payload);
+        var toRemove = _world.GetEntitiesWith<NetworkIdComponent>()
+            .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == disc.Id);
+        if (toRemove != null) _world.RemoveEntity(toRemove);
+        _logger.LogInformation("Player {Id} left", disc.Id);
     }
 
     public void Dispose() => _netManager.Stop();

@@ -14,9 +14,10 @@ services.AddSingleton<World>();
 services.AddSingleton<GameStateService>();
 services.AddSingleton<ClientNetworkManager>();
 services.AddSingleton<InputSystem>();
+services.AddSingleton<InterpolationSystem>();
+services.AddSingleton<BackgroundSystem>();
 services.AddSingleton<RenderSystem>();
 services.AddSingleton<HudSystem>();
-services.AddSingleton<BackgroundSystem>();
 services.AddSingleton<GameLoop>();
 
 var provider = services.BuildServiceProvider();

@@ -60,9 +60,16 @@ public class GameLoop
 
         foreach (var entity in _world.GetEntitiesWith<NetworkIdComponent>())
         {
-            var pos    = entity.GetComponent<PositionComponent>();
-            var netId  = entity.GetComponent<NetworkIdComponent>().Id;
-            packet.Players.Add(new PlayerSnapshot { Id = netId, X = pos.X, Y = pos.Y });
+            var pos   = entity.GetComponent<PositionComponent>();
+            var netId = entity.GetComponent<NetworkIdComponent>().Id;
+            packet.Players.Add(new PlayerSnapshot
+            {
+                Id    = netId,
+                TileX = pos.TileX,
+                TileY = pos.TileY,
+                X     = pos.VisualX,
+                Y     = pos.VisualY
+            });
         }
 
         _networkManager.BroadcastWorldState(packet);
