@@ -57,7 +57,7 @@ public class NetworkManager : IDisposable
         // Spawn en el centro del mapa
         int spawnX = Constants.MapWidth / 2;
         int spawnY = Constants.MapHeight / 2;
-        var player = new PlayerEntity(netId, spawnX, spawnY);
+        var player = new PlayerEntity(netId, spawnX, spawnY, Vocation.None);
         _world.AddEntity(player);
 
         _logger.LogInformation("Player {NetId} connected (PeerId={PeerId})", netId, peer.Id);
@@ -97,7 +97,6 @@ public class NetworkManager : IDisposable
                 _playerService.ApplyMoveRequest(netId, moveReq, _world);
                 break;
 
-            // Mantener compatibilidad con InputPacket si se necesita
             case PacketType.InputPacket:
                 break;
         }
@@ -112,6 +111,30 @@ public class NetworkManager : IDisposable
             writer.Put(data);
             peer.Send(writer, DeliveryMethod.Unreliable);
         }
+    }
+
+    /// <summary>
+    /// Envía stats actualizados a un jugador específico.
+    /// </summary>
+    public void SendStatsToPlayer(int networkId, StatsUpdatePacket packet)
+    {
+        if (!_peers.TryGetValue(networkId, out var peer)) return;
+        var data = PacketSerializer.Serialize(packet);
+        var writer = new NetDataWriter();
+        writer.Put(data);
+        peer.Send(writer, DeliveryMethod.ReliableOrdered);
+    }
+
+    /// <summary>
+    /// Envía skills actualizados a un jugador específico.
+    /// </summary>
+    public void SendSkillsToPlayer(int networkId, SkillsUpdatePacket packet)
+    {
+        if (!_peers.TryGetValue(networkId, out var peer)) return;
+        var data = PacketSerializer.Serialize(packet);
+        var writer = new NetDataWriter();
+        writer.Put(data);
+        peer.Send(writer, DeliveryMethod.ReliableOrdered);
     }
 
     private void BroadcastReliable(byte[] data)

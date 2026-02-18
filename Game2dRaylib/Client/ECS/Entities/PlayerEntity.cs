@@ -15,6 +15,11 @@ public class PlayerEntity : Entity
             Color = isLocal ? Color.Blue : Color.Red,
             Size  = Constants.PlayerSize
         });
-        if (isLocal) AddComponent(new LocalPlayerComponent());
+        if (isLocal)
+        {
+            AddComponent(new LocalPlayerComponent());
+            AddComponent(new StatsDataComponent());
+            AddComponent(new SkillsDataComponent());
+        }
     }
 }

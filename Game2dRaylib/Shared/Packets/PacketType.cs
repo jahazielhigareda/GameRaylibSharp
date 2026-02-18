@@ -6,5 +6,7 @@ public enum PacketType : byte
     WorldStatePacket         = 2,
     JoinAcceptedPacket       = 3,
     PlayerDisconnectedPacket = 4,
-    MoveRequestPacket        = 5
+    MoveRequestPacket        = 5,
+    StatsUpdatePacket        = 6,
+    SkillsUpdatePacket       = 7
 }

@@ -31,6 +31,8 @@ public static class PacketSerializer
             nameof(WorldStatePacket)         => PacketType.WorldStatePacket,
             nameof(JoinAcceptedPacket)       => PacketType.JoinAcceptedPacket,
             nameof(PlayerDisconnectedPacket) => PacketType.PlayerDisconnectedPacket,
+            nameof(StatsUpdatePacket)        => PacketType.StatsUpdatePacket,
+            nameof(SkillsUpdatePacket)       => PacketType.SkillsUpdatePacket,
             _ => throw new InvalidOperationException($"Unknown packet type: {typeof(T).Name}")
         };
     }

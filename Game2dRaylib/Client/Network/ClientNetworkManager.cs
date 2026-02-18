@@ -78,6 +78,14 @@ public class ClientNetworkManager : IDisposable
             case PacketType.PlayerDisconnectedPacket:
                 HandlePlayerDisconnected(payload);
                 break;
+
+            case PacketType.StatsUpdatePacket:
+                HandleStatsUpdate(payload);
+                break;
+
+            case PacketType.SkillsUpdatePacket:
+                HandleSkillsUpdate(payload);
+                break;
         }
     }
 
@@ -106,7 +114,6 @@ public class ClientNetworkManager : IDisposable
                 _world.AddEntity(remote);
                 entity = remote;
 
-                // Snap inmediato para la primera posición
                 var newPos = entity.GetComponent<PositionComponent>();
                 newPos.SetFromServer(snap.TileX, snap.TileY, snap.X, snap.Y);
                 newPos.SnapToTarget();
@@ -125,6 +132,60 @@ public class ClientNetworkManager : IDisposable
             .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == disc.Id);
         if (toRemove != null) _world.RemoveEntity(toRemove);
         _logger.LogInformation("Player {Id} left", disc.Id);
+    }
+
+    private void HandleStatsUpdate(byte[] payload)
+    {
+        var stats = MessagePackSerializer.Deserialize<StatsUpdatePacket>(payload);
+
+        // Solo aplicar al jugador local
+        if (stats.PlayerId != _state.LocalId) return;
+
+        var localPlayer = _world.GetEntitiesWith<LocalPlayerComponent>().FirstOrDefault();
+        if (localPlayer == null || !localPlayer.HasComponent<StatsDataComponent>()) return;
+
+        var data = localPlayer.GetComponent<StatsDataComponent>();
+        data.Level       = stats.Level;
+        data.Experience  = stats.Experience;
+        data.ExpToNext   = stats.ExpToNext;
+        data.CurrentHP   = stats.CurrentHP;
+        data.MaxHP       = stats.MaxHP;
+        data.CurrentMP   = stats.CurrentMP;
+        data.MaxMP       = stats.MaxMP;
+        data.Capacity    = stats.Capacity;
+        data.MaxCapacity = stats.MaxCapacity;
+        data.Soul        = stats.Soul;
+        data.Stamina     = stats.Stamina;
+        data.Vocation    = stats.Vocation;
+        data.Speed       = stats.Speed;
+    }
+
+    private void HandleSkillsUpdate(byte[] payload)
+    {
+        var skills = MessagePackSerializer.Deserialize<SkillsUpdatePacket>(payload);
+
+        if (skills.PlayerId != _state.LocalId) return;
+
+        var localPlayer = _world.GetEntitiesWith<LocalPlayerComponent>().FirstOrDefault();
+        if (localPlayer == null || !localPlayer.HasComponent<SkillsDataComponent>()) return;
+
+        var data = localPlayer.GetComponent<SkillsDataComponent>();
+        data.FistLevel       = skills.FistLevel;
+        data.FistPercent     = skills.FistPercent;
+        data.ClubLevel       = skills.ClubLevel;
+        data.ClubPercent     = skills.ClubPercent;
+        data.SwordLevel      = skills.SwordLevel;
+        data.SwordPercent    = skills.SwordPercent;
+        data.AxeLevel        = skills.AxeLevel;
+        data.AxePercent      = skills.AxePercent;
+        data.DistanceLevel   = skills.DistanceLevel;
+        data.DistancePercent = skills.DistancePercent;
+        data.ShieldingLevel  = skills.ShieldingLevel;
+        data.ShieldingPercent = skills.ShieldingPercent;
+        data.FishingLevel    = skills.FishingLevel;
+        data.FishingPercent  = skills.FishingPercent;
+        data.MagicLevel      = skills.MagicLevel;
+        data.MagicPercent    = skills.MagicPercent;
     }
 
     public void Dispose() => _netManager.Stop();

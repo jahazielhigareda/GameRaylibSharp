@@ -13,6 +13,7 @@ services.AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
 services.AddSingleton<World>();
 services.AddSingleton<PlayerService>();
 services.AddSingleton<MovementSystem>();
+services.AddSingleton<StatsSystem>();
 services.AddSingleton<NetworkManager>();
 services.AddSingleton<GameLoop>();
 
