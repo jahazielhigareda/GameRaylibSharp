@@ -30,6 +30,9 @@ public class RenderSystem : ISystem
                                   ref PositionComponent pos,
                                   ref RenderComponent render) =>
         {
+            // Skip entities managed by CreatureRenderSystem (avoids double draw)
+            if (entity.Has<CreatureRenderOrder>()) return;
+
             // Frustum culling by tile
             if (pos.TileX < _bg.VisibleMinTileX - 1 ||
                 pos.TileX > _bg.VisibleMaxTileX + 1 ||

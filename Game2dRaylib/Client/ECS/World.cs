@@ -35,6 +35,9 @@ public sealed class ClientWorld : IDisposable
     private static readonly QueryDescription RenderQuery = new QueryDescription()
         .WithAll<PositionComponent, RenderComponent>();
 
+    private static readonly QueryDescription EffectQuery = new QueryDescription()
+        .WithAll<PositionComponent, EffectComponent>();
+
     // ── Entity creation ───────────────────────────────────────────────────
 
     /// <summary>Spawn (or re-use) a player entity for a given network id.</summary>
@@ -49,6 +52,7 @@ public sealed class ClientWorld : IDisposable
                 new NetworkIdComponent { Id = networkId },
                 new PositionComponent(),
                 new RenderComponent { Color = color, Size = Constants.PlayerSize },
+                new CreatureRenderOrder(),
                 new StatsDataComponent(),
                 new SkillsDataComponent());
         }
@@ -56,7 +60,8 @@ public sealed class ClientWorld : IDisposable
         return World.Create(
             new NetworkIdComponent { Id = networkId },
             new PositionComponent(),
-            new RenderComponent { Color = color, Size = Constants.PlayerSize });
+            new RenderComponent { Color = color, Size = Constants.PlayerSize },
+            new CreatureRenderOrder());
     }
 
     public void DestroyEntity(Entity entity) => World.Destroy(entity);

@@ -9,6 +9,7 @@ namespace Client.ECS.Systems;
 /// Arch-based background system.
 /// Draws tile grid with Tibia-style frustum culling.
 /// </summary>
+// Legacy system kept for compatibility. Camera logic migrated to CameraService.
 public class BackgroundSystem : ISystem
 {
     private readonly ClientWorld _world;

@@ -2,6 +2,7 @@ using Arch.Core.Extensions;
 using LiteNetLib;
 using LiteNetLib.Utils;
 using Microsoft.Extensions.Logging;
+using Server.Events;
 using Server.ECS;
 using Server.ECS.Components;
 using Server.Services;
@@ -40,12 +41,16 @@ public class NetworkManager : IDisposable
     private const int MaxPacketsPerSecond = 120;
     private const int AbuseThreshold      = 5;
 
+    private readonly EventBus _eventBus;
+
     public NetworkManager(ILogger<NetworkManager> logger,
-                          ServerWorld world, PlayerService playerService)
+                          ServerWorld world, PlayerService playerService,
+                          EventBus eventBus)
     {
         _logger        = logger;
         _world         = world;
         _playerService = playerService;
+        _eventBus      = eventBus;
         _listener      = new EventBasedNetListener();
         _netManager    = new NetManager(_listener);
 
@@ -95,6 +100,8 @@ public class NetworkManager : IDisposable
 
         _playerService.RemovePlayer(netId, _world);
         _logger.LogInformation("Player {NetId} disconnected", netId);
+
+        _eventBus.Publish(new PlayerDisconnectedEvent { NetworkId = netId });
 
         var data = PacketSerializer.Serialize(new PlayerDisconnectedPacket { Id = netId });
         BroadcastReliable(data);
@@ -219,6 +226,34 @@ public class NetworkManager : IDisposable
         }
     }
 
+
+    /// <summary>
+    /// Sends a per-player (AoI-filtered) WorldStatePacket to a single peer.
+    /// Uses the same delta-compression pipeline as BroadcastWorldState.
+    /// </summary>
+    public void SendWorldStateToPlayer(int networkId, WorldStatePacket packet)
+    {
+        if (!_peers.TryGetValue(networkId, out var peer)) return;
+        if (!_sessions.TryGetValue(networkId, out var session)) return;
+
+        var update = WorldStateDeltaBuilder.BuildUpdate(packet, session);
+
+        byte[] data;
+        if (update is WorldDeltaPacket delta)
+        {
+            data = PacketSerializer.BuildPacket(
+                delta, PacketType.WorldDeltaPacket, compress: true);
+        }
+        else
+        {
+            data = PacketSerializer.BuildPacket(
+                (WorldStatePacket)update, PacketType.WorldStatePacket, compress: true);
+        }
+
+        var writer = new LiteNetLib.Utils.NetDataWriter();
+        writer.Put(data);
+        peer.Send(writer, LiteNetLib.DeliveryMethod.Unreliable);
+    }
     public void SendStatsToPlayer(int networkId, StatsUpdatePacket packet)
     {
         if (!_peers.TryGetValue(networkId, out var peer)) return;
