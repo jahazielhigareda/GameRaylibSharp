@@ -10,4 +10,6 @@ public enum PacketType : byte
     StatsUpdatePacket        = 6,
     SkillsUpdatePacket       = 7,
     WorldDeltaPacket         = 8,   // delta snapshot
+    FloorChangePacket        = 9,
+    MapDataPacket            = 10,
 }

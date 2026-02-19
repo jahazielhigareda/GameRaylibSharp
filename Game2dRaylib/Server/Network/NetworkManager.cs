@@ -1,3 +1,4 @@
+using Server.Maps;
 using Arch.Core.Extensions;
 using LiteNetLib;
 using LiteNetLib.Utils;
@@ -36,7 +37,11 @@ public class NetworkManager : IDisposable
     private readonly Dictionary<int, int>              _peerToNetId = new();
     private readonly Dictionary<int, PeerSessionState> _sessions    = new();
 
-    private int _nextNetworkId = 1;
+    private int      _nextNetworkId = 1;
+    private MapData? _currentMap;
+
+    /// <summary>Call from GameLoop after map is loaded so new peers get the map.</summary>
+    public void SetMapData(MapData map) => _currentMap = map;
 
     private const int MaxPacketsPerSecond = 120;
     private const int AbuseThreshold      = 5;
@@ -89,6 +94,10 @@ public class NetworkManager : IDisposable
         var writer = new NetDataWriter();
         writer.Put(data);
         peer.Send(writer, DeliveryMethod.ReliableOrdered);
+
+        // Send map data immediately after join so client can render tiles
+        if (_currentMap != null)
+            SendMapData(peer, _currentMap);
     }
 
     private void OnPeerDisconnected(NetPeer peer, DisconnectInfo info)
@@ -262,11 +271,47 @@ public class NetworkManager : IDisposable
         peer.Send(writer, DeliveryMethod.ReliableOrdered);
     }
 
+    public void SendFloorChange(int networkId, FloorChangePacket packet)
+    {
+        if (!_peers.TryGetValue(networkId, out var peer)) return;
+        var writer = new NetDataWriter();
+        writer.Put(PacketSerializer.Serialize(packet));
+        peer.Send(writer, DeliveryMethod.ReliableOrdered);
+    }
+
     public void SendSkillsToPlayer(int networkId, SkillsUpdatePacket packet)
     {
         if (!_peers.TryGetValue(networkId, out var peer)) return;
         var writer = new NetDataWriter();
         writer.Put(PacketSerializer.Serialize(packet));
+        peer.Send(writer, DeliveryMethod.ReliableOrdered);
+    }
+
+    private static void SendMapData(NetPeer peer, MapData map)
+    {
+        int total = map.Width * map.Height * map.Floors;
+        var groundIds = new ushort[total];
+        var flags     = new ushort[total];
+        for (int z = 0; z < map.Floors;  z++)
+        for (int y = 0; y < map.Height; y++)
+        for (int x = 0; x < map.Width;  x++)
+        {
+            int idx = x + y * map.Width + z * map.Width * map.Height;
+            groundIds[idx] = map.Tiles[x, y, z].GroundItemId;
+            flags[idx]     = (ushort)map.Tiles[x, y, z].Flags;
+        }
+        var pkt = new MapDataPacket
+        {
+            Width       = map.Width,
+            Height      = map.Height,
+            Floors      = map.Floors,
+            GroundFloor = map.GroundFloor,
+            GroundIds   = groundIds,
+            Flags       = flags,
+        };
+        var data   = PacketSerializer.BuildPacket(pkt, PacketType.MapDataPacket, compress: true);
+        var writer = new NetDataWriter();
+        writer.Put(data);
         peer.Send(writer, DeliveryMethod.ReliableOrdered);
     }
 

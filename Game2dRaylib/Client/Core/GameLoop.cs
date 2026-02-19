@@ -49,6 +49,7 @@ public class GameLoop
         Raylib.InitWindow(800, 600, "Game2dRaylib - Tibia Movement [Arch ECS]");
         Raylib.SetTargetFPS(Constants.TickRate);
 
+        _network.SetTileRenderSystem(_tileRenderSystem);
         _network.Connect();
 
         while (!Raylib.WindowShouldClose())

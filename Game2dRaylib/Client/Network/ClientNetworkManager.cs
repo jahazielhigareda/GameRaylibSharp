@@ -4,6 +4,7 @@ using LiteNetLib.Utils;
 using Microsoft.Extensions.Logging;
 using Client.ECS;
 using Client.ECS.Components;
+using Client.ECS.Systems;
 using Client.Services;
 using Shared;
 using Shared.Network;
@@ -11,14 +12,6 @@ using Shared.Packets;
 
 namespace Client.Network;
 
-/// <summary>
-/// Client-side LiteNetLib manager.
-///
-/// Changes vs. original:
-/// - Parses full 5-byte framed NetworkPacket headers.
-/// - Handles both WorldStatePacket (full) and WorldDeltaPacket (delta).
-/// - Stamps outbound MoveRequest packets with a monotonic ushort sequence number.
-/// </summary>
 public class ClientNetworkManager : IDisposable
 {
     private readonly EventBasedNetListener         _listener;
@@ -27,8 +20,10 @@ public class ClientNetworkManager : IDisposable
     private readonly ClientWorld                   _world;
     private readonly GameStateService              _state;
     private NetPeer? _server;
+    private TileRenderSystem? _tileRenderSystem;
+    private TileCell[,,]?     _pendingGrid;        // cache si TRS no est� listo
+    private byte              _pendingGroundFloor;
 
-    // Monotonic outbound sequence counter – wraps naturally as ushort.
     private ushort _moveSequence;
 
     public ClientNetworkManager(ILogger<ClientNetworkManager> logger,
@@ -45,6 +40,18 @@ public class ClientNetworkManager : IDisposable
         _listener.NetworkReceiveEvent   += OnReceive;
     }
 
+    public void SetTileRenderSystem(TileRenderSystem trs)
+    {
+        _tileRenderSystem = trs;
+        if (_pendingGrid != null)
+        {
+            _tileRenderSystem.SetMapGrid3D(_pendingGrid);
+            _state.CurrentFloorZ = _pendingGroundFloor;
+            _logger.LogInformation("Pending map applied: floor={F}", _pendingGroundFloor);
+            _pendingGrid = null;
+        }
+    }
+
     public void Connect()
     {
         _netManager.Start();
@@ -55,21 +62,15 @@ public class ClientNetworkManager : IDisposable
 
     public void PollEvents() => _netManager.PollEvents();
 
-    // ── Outbound ──────────────────────────────────────────────────────────
-
     public void SendMoveRequest(MoveRequestPacket packet)
     {
         if (_server == null) return;
-
-        packet.Sequence = _moveSequence++;   // stamp sequence before sending
-
+        packet.Sequence = _moveSequence++;
         var data   = PacketSerializer.Serialize(packet);
         var writer = new NetDataWriter();
         writer.Put(data);
         _server.Send(writer, DeliveryMethod.ReliableOrdered);
     }
-
-    // ── Inbound ───────────────────────────────────────────────────────────
 
     private void OnReceive(NetPeer peer, NetPacketReader reader,
                            byte channel, DeliveryMethod delivery)
@@ -96,10 +97,10 @@ public class ClientNetworkManager : IDisposable
             case PacketType.PlayerDisconnectedPacket: HandlePlayerDisconnected(packet); break;
             case PacketType.StatsUpdatePacket:        HandleStatsUpdate(packet);        break;
             case PacketType.SkillsUpdatePacket:       HandleSkillsUpdate(packet);       break;
+            case PacketType.MapDataPacket:            HandleMapData(packet);            break;
+            case PacketType.FloorChangePacket:        HandleFloorChange(packet);        break;
         }
     }
-
-    // ── Handlers ──────────────────────────────────────────────────────────
 
     private void HandleJoinAccepted(NetworkPacket packet)
     {
@@ -121,16 +122,13 @@ public class ClientNetworkManager : IDisposable
         var delta = PacketSerializer.ParsePacket<WorldDeltaPacket>(packet);
         _state.Tick = delta.Tick;
 
-        // Apply additions as full snapshots
         if (delta.Added.Count > 0)
             ApplyFullSnapshot(delta.Added);
 
-        // Merge updated fields into existing entities
         foreach (var d in delta.Updated)
         {
             var entity = _world.FindPlayer(d.Id);
             if (entity == Arch.Core.Entity.Null) continue;
-
             ref var pos = ref entity.Get<PositionComponent>();
             if (d.TileX.HasValue) pos.TileX   = d.TileX.Value;
             if (d.TileY.HasValue) pos.TileY   = d.TileY.Value;
@@ -138,7 +136,6 @@ public class ClientNetworkManager : IDisposable
             if (d.Y.HasValue)     pos.TargetY = d.Y.Value;
         }
 
-        // Remove departed players
         foreach (var id in delta.Removed)
         {
             var entity = _world.FindPlayer(id);
@@ -151,7 +148,6 @@ public class ClientNetworkManager : IDisposable
         foreach (var snap in players)
         {
             var entity = _world.FindPlayer(snap.Id);
-
             if (entity == Arch.Core.Entity.Null)
             {
                 entity = _world.SpawnPlayer(snap.Id, snap.Id == _state.LocalId);
@@ -160,7 +156,6 @@ public class ClientNetworkManager : IDisposable
                 newPos.SnapToTarget();
                 continue;
             }
-
             ref var pos = ref entity.Get<PositionComponent>();
             pos.SetFromServer(snap.TileX, snap.TileY, snap.X, snap.Y);
         }
@@ -178,10 +173,8 @@ public class ClientNetworkManager : IDisposable
     {
         var stats = PacketSerializer.ParsePacket<StatsUpdatePacket>(packet);
         if (stats.PlayerId != _state.LocalId) return;
-
         if (!_world.TryGetLocalPlayer(out var local)) return;
         if (!local.Has<StatsDataComponent>()) return;
-
         ref var data = ref local.Get<StatsDataComponent>();
         data.Level       = stats.Level;
         data.Experience  = stats.Experience;
@@ -202,10 +195,8 @@ public class ClientNetworkManager : IDisposable
     {
         var skills = PacketSerializer.ParsePacket<SkillsUpdatePacket>(packet);
         if (skills.PlayerId != _state.LocalId) return;
-
         if (!_world.TryGetLocalPlayer(out var local)) return;
         if (!local.Has<SkillsDataComponent>()) return;
-
         ref var data = ref local.Get<SkillsDataComponent>();
         data.FistLevel        = skills.FistLevel;
         data.FistPercent      = skills.FistPercent;
@@ -223,6 +214,43 @@ public class ClientNetworkManager : IDisposable
         data.FishingPercent   = skills.FishingPercent;
         data.MagicLevel       = skills.MagicLevel;
         data.MagicPercent     = skills.MagicPercent;
+    }
+
+    private void HandleMapData(NetworkPacket packet)
+    {
+        var mp = PacketSerializer.ParsePacket<MapDataPacket>(packet);
+        _logger.LogInformation("Map received: {W}x{H}x{F}", mp.Width, mp.Height, mp.Floors);
+
+        if (_tileRenderSystem == null)
+        {
+            _logger.LogWarning("HandleMapData: _tileRenderSystem is null – map discarded!");
+            return;
+        }
+
+        var grid = new TileCell[mp.Width, mp.Height, mp.Floors];
+        for (int z = 0; z < mp.Floors;  z++)
+        for (int y = 0; y < mp.Height; y++)
+        for (int x = 0; x < mp.Width;  x++)
+        {
+            int idx = x + y * mp.Width + z * mp.Width * mp.Height;
+            grid[x, y, z] = TileCell.FromGroundId(mp.GroundIds[idx], mp.Flags[idx]);
+        }
+        _tileRenderSystem.SetMapGrid3D(grid);
+        _state.CurrentFloorZ = mp.GroundFloor;
+        _logger.LogInformation("Map grid set. Floor={F}", mp.GroundFloor);
+    }
+
+    private void HandleFloorChange(NetworkPacket packet)
+    {
+        var fc = PacketSerializer.ParsePacket<FloorChangePacket>(packet);
+        _state.CurrentFloorZ = fc.ToZ;
+        if (_world.TryGetLocalPlayer(out var local))
+        {
+            ref var pos = ref local.Get<PositionComponent>();
+            pos.TileX = fc.X;
+            pos.TileY = fc.Y;
+        }
+        _logger.LogInformation("Floor changed: {From} -> {To}", fc.FromZ, fc.ToZ);
     }
 
     public void Dispose() => _netManager.Stop();

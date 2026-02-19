@@ -46,10 +46,12 @@ public sealed class ServerWorld : IDisposable
 
     /// <summary>Spawn a player archetype.</summary>
     public Entity SpawnPlayer(int networkId, int tileX, int tileY,
-                              Vocation vocation = Vocation.None)
+                              Vocation vocation = Vocation.None,
+                              byte floorZ = 7)
     {
         var pos = new PositionComponent();
         pos.SetTilePosition(tileX, tileY);
+        pos.FloorZ = floorZ;
 
         var stats = new StatsComponent();
         stats.Initialize(vocation);
@@ -66,10 +68,12 @@ public sealed class ServerWorld : IDisposable
 
     /// <summary>Spawn a creature archetype.</summary>
     public Entity SpawnCreature(ushort creatureId, int tileX, int tileY,
-                                int maxHp, bool aggressive = true)
+                                int maxHp, bool aggressive = true,
+                                byte floorZ = 7)
     {
         var pos = new PositionComponent();
         pos.SetTilePosition(tileX, tileY);
+        pos.FloorZ = floorZ;
 
         return World.Create(
             new CreatureTag(),
@@ -86,10 +90,12 @@ public sealed class ServerWorld : IDisposable
     }
 
     /// <summary>Spawn an NPC archetype.</summary>
-    public Entity SpawnNpc(ushort creatureId, int tileX, int tileY, int maxHp)
+    public Entity SpawnNpc(ushort creatureId, int tileX, int tileY, int maxHp,
+                           byte floorZ = 7)
     {
         var pos = new PositionComponent();
         pos.SetTilePosition(tileX, tileY);
+        pos.FloorZ = floorZ;
 
         return World.Create(
             new NpcTag(),

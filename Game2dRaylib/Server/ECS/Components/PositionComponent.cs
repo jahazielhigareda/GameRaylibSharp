@@ -10,6 +10,7 @@ public struct PositionComponent
     // Logical tile position
     public int   TileX;
     public int   TileY;
+    public byte  FloorZ;
 
     // Visual pixel position (interpolated)
     public float VisualX;

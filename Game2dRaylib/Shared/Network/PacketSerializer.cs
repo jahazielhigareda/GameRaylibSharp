@@ -19,6 +19,7 @@ public static class PacketSerializer
     {
         PacketType.WorldStatePacket,
         PacketType.WorldDeltaPacket,
+        PacketType.MapDataPacket,
     };
 
     /// <summary>Shared registry – register additional handlers at startup if needed.</summary>
@@ -120,6 +121,8 @@ public static class PacketSerializer
             nameof(PlayerDisconnectedPacket) => PacketType.PlayerDisconnectedPacket,
             nameof(StatsUpdatePacket)        => PacketType.StatsUpdatePacket,
             nameof(SkillsUpdatePacket)       => PacketType.SkillsUpdatePacket,
+            nameof(FloorChangePacket)        => PacketType.FloorChangePacket,
+            nameof(MapDataPacket)            => PacketType.MapDataPacket,
             _ => throw new InvalidOperationException($"Unknown packet type: {typeof(T).Name}")
         };
 }

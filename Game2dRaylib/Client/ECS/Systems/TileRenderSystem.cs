@@ -8,9 +8,8 @@ namespace Client.ECS.Systems;
 /// Renders tile layers 0-2 and 4-5 (everything except creatures) using
 /// Tibia's Painter's Algorithm: NW→SE, layer 0 first, layer 5 last.
 ///
-/// The map is supplied via SetMapGrid() called once after the client
-/// receives or loads map data.  Until then the system falls back to the
-/// legacy solid-colour grid.
+/// Multi-floor: reads CurrentFloorZ from GameStateService and uses the
+/// matching floor slice when a 3-D grid has been supplied via SetMapGrid3D.
 ///
 /// Layer order:
 ///   0 GROUND      – grass / water / sand / stone colours
@@ -22,25 +21,43 @@ namespace Client.ECS.Systems;
 /// </summary>
 public class TileRenderSystem : ISystem
 {
-    private readonly ClientWorld     _world;
-    private readonly CameraService   _camera;
+    private readonly ClientWorld      _world;
+    private readonly CameraService    _camera;
+    private readonly GameStateService _state;
 
-    // Optional map grid – null until server sends map info
+    // 2-D grid (legacy, single floor)
     private TileCell[,]? _grid;
     private int           _gridW, _gridH;
 
-    public TileRenderSystem(ClientWorld world, CameraService camera)
+    // 3-D grid [x, y, floor] (multi-floor)
+    private TileCell[,,]? _grid3D;
+    private int            _grid3DW, _grid3DH, _grid3DFloors;
+
+    public TileRenderSystem(ClientWorld world, CameraService camera, GameStateService state)
     {
         _world  = world;
         _camera = camera;
+        _state  = state;
     }
 
-    /// <summary>Called by ClientNetworkManager when MapData arrives.</summary>
+    /// <summary>Called by ClientNetworkManager when MapData arrives (2-D compat).</summary>
     public void SetMapGrid(TileCell[,] grid)
     {
         _grid  = grid;
         _gridW = grid.GetLength(0);
         _gridH = grid.GetLength(1);
+    }
+
+    /// <summary>Called when a 3-D map grid is available.</summary>
+    public void SetMapGrid3D(TileCell[,,] grid)
+    {
+        _grid3D       = grid;
+        _grid3DW      = grid.GetLength(0);
+        _grid3DH      = grid.GetLength(1);
+        _grid3DFloors = grid.GetLength(2);
+        // Also populate the 2-D slice for compatibility
+        _gridW = _grid3DW;
+        _gridH = _grid3DH;
     }
 
     public void Update(float deltaTime)
@@ -55,23 +72,49 @@ public class TileRenderSystem : ISystem
         int maxTX = (int)Math.Floor((-offsetX + sw) / ts) + 1;
         int maxTY = (int)Math.Floor((-offsetY + sh) / ts) + 1;
 
-        if (_grid != null)
+        byte currentZ = _state.CurrentFloorZ;
+
+        if (_grid3D != null)
+        {
+            maxTX = Math.Min(maxTX, _grid3DW - 1);
+            maxTY = Math.Min(maxTY, _grid3DH - 1);
+
+            for (int ty = minTY; ty <= maxTY; ty++)
+            for (int tx = minTX; tx <= maxTX; tx++)
+            {
+                if (tx < 0 || tx >= _grid3DW || ty < 0 || ty >= _grid3DH) continue;
+                int sx = (int)(tx * ts + offsetX);
+                int sy = (int)(ty * ts + offsetY);
+                int z  = Math.Clamp(currentZ, 0, _grid3DFloors - 1);
+                DrawLayered(sx, sy, ts, _grid3D[tx, ty, z]);
+            }
+        }
+        else if (_grid != null)
         {
             maxTX = Math.Min(maxTX, _gridW - 1);
             maxTY = Math.Min(maxTY, _gridH - 1);
+
+            for (int ty = minTY; ty <= maxTY; ty++)
+            for (int tx = minTX; tx <= maxTX; tx++)
+            {
+                int sx = (int)(tx * ts + offsetX);
+                int sy = (int)(ty * ts + offsetY);
+
+                if (tx < _gridW && ty < _gridH)
+                    DrawLayered(sx, sy, ts, _grid[tx, ty]);
+                else
+                    DrawFallback(sx, sy, ts, tx, ty);
+            }
         }
-
-        // NW → SE scan
-        for (int ty = minTY; ty <= maxTY; ty++)
-        for (int tx = minTX; tx <= maxTX; tx++)
+        else
         {
-            int sx = (int)(tx * ts + offsetX);
-            int sy = (int)(ty * ts + offsetY);
-
-            if (_grid != null && tx < _gridW && ty < _gridH)
-                DrawLayered(sx, sy, ts, _grid[tx, ty]);
-            else
+            for (int ty = minTY; ty <= maxTY; ty++)
+            for (int tx = minTX; tx <= maxTX; tx++)
+            {
+                int sx = (int)(tx * ts + offsetX);
+                int sy = (int)(ty * ts + offsetY);
                 DrawFallback(sx, sy, ts, tx, ty);
+            }
         }
     }
 
@@ -82,12 +125,12 @@ public class TileRenderSystem : ISystem
         // Layer 0 – GROUND
         Raylib.DrawRectangle(sx, sy, ts, ts, cell.GroundColor);
 
-        // Layer 1 – BORDER accent (thin 1-px inset rect if border tile)
+        // Layer 1 – BORDER accent
         if (cell.HasBorder)
             Raylib.DrawRectangleLines(sx + 1, sy + 1, ts - 2, ts - 2,
                 ColorAlpha(cell.GroundColor, 0.45f));
 
-        // Layer 2 – BOTTOM ITEM (small centred dot)
+        // Layer 2 – BOTTOM ITEM
         if (cell.BottomItemId != 0)
         {
             int r = ts / 8;
@@ -95,7 +138,7 @@ public class TileRenderSystem : ISystem
                 new Color(160, 130, 80, 200));
         }
 
-        // Layer 4 – TOP ITEM (tree / wall: taller rectangle)
+        // Layer 4 – TOP ITEM
         if (cell.TopItemId != 0)
         {
             int tw = ts - 6;
@@ -109,13 +152,19 @@ public class TileRenderSystem : ISystem
         if (cell.EffectId != 0)
             Raylib.DrawRectangle(sx, sy, ts, ts, new Color(255, 255, 100, 40));
 
-        // grid line
+        // Stair/rope indicators
+        if (cell.IsStairUp)
+            Raylib.DrawText("▲", sx + ts/4, sy + ts/4, ts/2, new Color(200, 200, 50, 230));
+        else if (cell.IsStairDown)
+            Raylib.DrawText("▼", sx + ts/4, sy + ts/4, ts/2, new Color(200, 100, 50, 230));
+        else if (cell.IsRopeSpot)
+            Raylib.DrawText("O", sx + ts/4, sy + ts/4, ts/2, new Color(180, 120, 60, 230));
+
         Raylib.DrawRectangleLines(sx, sy, ts, ts, new Color(60, 60, 60, 120));
     }
 
     private static void DrawFallback(int sx, int sy, int ts, int tx, int ty)
     {
-        // Legacy: border = wall (gray), interior = walkable (dark)
         bool isWall = tx == 0 || ty == 0;
         var  col    = isWall
             ? new Color(30, 30, 30, 255)
@@ -142,16 +191,21 @@ public struct TileCell
     public Color  TopItemColor;
     public ushort EffectId;
     public bool   IsWalkable;
+    public bool   IsStairUp;
+    public bool   IsStairDown;
+    public bool   IsRopeSpot;
 
     /// <summary>Build a TileCell from a ground item id.</summary>
     public static TileCell FromGroundId(ushort groundId, ushort flags)
     {
-        bool walkable = (flags & 0x0001) != 0;
-        bool blockProj = (flags & 0x0002) != 0;
+        bool walkable  = (flags & 0x0001) != 0;
 
         Color groundColor;
-        ushort topItemId  = 0;
-        Color  topColor   = default;
+        ushort topItemId = 0;
+        Color  topColor  = default;
+        bool isStairUp   = false;
+        bool isStairDown = false;
+        bool isRopeSpot  = false;
 
         switch (groundId)
         {
@@ -165,6 +219,18 @@ public struct TileCell
                 topColor    = new Color(0,  80,  0,  255);
                 break;
             case 1:    groundColor = new Color(50,  50,  50,  255); break; // Wall
+            case 420:                                                        // Stair Up
+                groundColor = new Color(180, 150, 80,  255);
+                isStairUp   = true;
+                break;
+            case 421:                                                        // Stair Down
+                groundColor  = new Color(150, 100, 60,  255);
+                isStairDown  = true;
+                break;
+            case 3866:                                                       // Rope Spot
+                groundColor = new Color(160, 120, 60,  255);
+                isRopeSpot  = true;
+                break;
             default:   groundColor = new Color(60,  60,  60,  255); break;
         }
 
@@ -176,6 +242,9 @@ public struct TileCell
             TopItemId    = topItemId,
             TopItemColor = topColor,
             IsWalkable   = walkable,
+            IsStairUp    = isStairUp,
+            IsStairDown  = isStairDown,
+            IsRopeSpot   = isRopeSpot,
         };
     }
 }

@@ -57,6 +57,8 @@ public class GameLoop
         string mapPath = Path.Combine(AppContext.BaseDirectory, "world.map");
         _mapData = _mapLoader.Load(mapPath);
         _movementSystem.SetMapData(_mapData);
+        _networkManager.SetMapData(_mapData);
+        _movementSystem.NetworkManager = _networkManager;
 
         const float targetDelta = 1f / Constants.TickRate;
         var sw = Stopwatch.StartNew();

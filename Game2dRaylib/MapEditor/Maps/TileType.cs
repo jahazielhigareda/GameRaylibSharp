@@ -1,4 +1,4 @@
-namespace Server.Maps;
+namespace MapEditor.Maps;
 
 public enum TileType : ushort
 {
