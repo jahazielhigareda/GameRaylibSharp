@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Server.Combat;
 using Server.ECS;
 using Server.ECS.Components;
+using Server.Maps;
 using Shared;
 
 namespace Server.ECS.Systems;
@@ -11,18 +12,25 @@ namespace Server.ECS.Systems;
 /// <summary>
 /// Processes all player-vs-creature and creature-vs-player combat each tick.
 ///
+/// Canary equivalents:
+///   - game/game.cpp  Game::checkCreatureAttack()
+///   - game/combat.cpp Combat::doCombat()
+///
 /// Responsibilities:
 ///   1. Player attacks their targeted creature using Tibia melee/distance formulas.
 ///   2. Creature attacks targeted player (delegated from CreatureAiSystem via this system).
 ///   3. On creature death: award XP to the attacker, mark for respawn.
 ///   4. On player death: reset HP (simple respawn — full death system in later task).
 ///   5. Skill training for attacker's weapon skill and defender's shielding.
+///   6. (Task 2.6) Line-of-sight check for distance attacks.
 /// </summary>
 public sealed class CombatSystem : ISystem
 {
     private readonly ServerWorld            _world;
     private readonly ILogger<CombatSystem>  _logger;
     private readonly Random                 _rng = new();
+
+    private MapData? _mapData;
 
     // ── Base attack speed ── players attack once every N seconds (base)
     private const float PlayerBaseAttackInterval = 2.0f;
@@ -36,6 +44,8 @@ public sealed class CombatSystem : ISystem
         _world  = world;
         _logger = logger;
     }
+
+    public void SetMapData(MapData map) => _mapData = map;
 
     public void Update(float deltaTime)
     {
@@ -88,6 +98,33 @@ public sealed class CombatSystem : ISystem
                 return;
             }
 
+            // ── Task 2.6: Line-of-Sight check for distance attacks ────────
+            if (isDistance && _mapData != null)
+            {
+                bool hasLoS = LosChecker.HasLineOfSight(
+                    _mapData,
+                    pos.TileX, pos.TileY,
+                    creaturePos.TileX, creaturePos.TileY,
+                    pos.FloorZ);
+
+                if (!hasLoS)
+                {
+                    // No LoS – try to reposition (auto-walk toward target)
+                    if (playerEntity.Has<MovementQueueComponent>())
+                    {
+                        ref var mq = ref playerEntity.Get<MovementQueueComponent>();
+                        int dx = creaturePos.TileX - pos.TileX;
+                        int dy = creaturePos.TileY - pos.TileY;
+                        var stepDir = Shared.DirectionHelper.FromOffset(
+                            dx == 0 ? 0 : (dx > 0 ? 1 : -1),
+                            dy == 0 ? 0 : (dy > 0 ? 1 : -1));
+                        if (mq.QueuedDirection == (byte)Shared.Direction.None)
+                            mq.QueuedDirection = (byte)stepDir;
+                    }
+                    return;
+                }
+            }
+
             // ── Calculate damage ────────────────────────────────────────
             int damage;
             if (isDistance)
@@ -104,7 +141,7 @@ public sealed class CombatSystem : ISystem
                 damage = CombatFormulas.CalculateMeleeDamage(
                     skills.GetLevel(CombatFormulas.AttackSkillType(combat.WeaponSkillType)),
                     combat.WeaponAttack,
-                    skills.GetLevel(SkillType.Shielding), // defender uses own shielding
+                    skills.GetLevel(SkillType.Shielding),
                     combat.ShieldDefense,
                     creature.Armor,
                     _rng);
@@ -118,9 +155,6 @@ public sealed class CombatSystem : ISystem
             // ── Skill training ──────────────────────────────────────────
             var weaponSkillType = CombatFormulas.AttackSkillType(combat.WeaponSkillType);
             skills.AddTries(weaponSkillType, 1, stats.Vocation);
-
-            // Creature also trains player's shielding if it is in Attack state
-            // (we check below at death — shielding is trained on being hit)
 
             // ── Reset attack cooldown ────────────────────────────────────
             combat.AttackCooldown = PlayerBaseAttackInterval;
@@ -192,13 +226,11 @@ public sealed class CombatSystem : ISystem
         _logger.LogInformation("Creature {Name} died. Awarding {Exp} XP to player {PId}.",
             creature.Name, creature.Experience, killerEntity.Id);
 
-        // Award experience
         bool leveledUp = killerStats.AddExperience(creature.Experience);
         if (leveledUp)
             _logger.LogInformation("Player {PId} leveled up to {Level}!",
                 killerEntity.Id, killerStats.Level);
 
-        // Mark creature as dead in AI component (SpawnManager handles respawn timer)
         if (creatureEntity.Has<CreatureAiComponent>())
         {
             ref var ai = ref creatureEntity.Get<CreatureAiComponent>();
@@ -211,11 +243,10 @@ public sealed class CombatSystem : ISystem
     {
         _logger.LogInformation("Player {PId} died.", playerEntity.Id);
 
-        // Simple respawn: restore HP to full (full death system is a future task)
+        // Simple respawn: restore HP to full (full death system in later task)
         stats.CurrentHP = stats.MaxHP;
         stats.IsDirty   = true;
 
-        // Clear combat target
         if (playerEntity.Has<CombatComponent>())
         {
             ref var combat = ref playerEntity.Get<CombatComponent>();

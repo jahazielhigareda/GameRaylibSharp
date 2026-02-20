@@ -32,7 +32,7 @@ public class GameLoop
     private MapData? _mapData;
     private int      _tick;
     private float    _statsTimer;
-    private const float StatsBroadcastInterval = 1.0f;
+    private const float StatsBroadcastInterval = 0.25f; // reduced from 1s for responsive HP feedback
 
     public GameLoop(
         ILogger<GameLoop> logger,
@@ -67,6 +67,7 @@ public class GameLoop
         _mapData = _mapLoader.Load(mapPath);
         _movementSystem.SetMapData(_mapData);
         _creatureAiSystem.SetMapData(_mapData);
+        _combatSystem.SetMapData(_mapData);          // wire LoS map data
         _networkManager.SetMapData(_mapData);
         _movementSystem.NetworkManager = _networkManager;
 
@@ -75,11 +76,11 @@ public class GameLoop
         _spawnManager.RegisterDefaultSpawns();
         _spawnManager.SpawnAll();
 
+        _logger.LogInformation("Game loop started at {TickRate} ticks/s", Constants.TickRate);
+
         const float targetDelta = 1f / Constants.TickRate;
         var sw = Stopwatch.StartNew();
         double accumulator = 0;
-
-        _logger.LogInformation("Game loop started at {TickRate} ticks/s", Constants.TickRate);
 
         while (!token.IsCancellationRequested)
         {
@@ -122,9 +123,8 @@ public class GameLoop
         {
             var packet = new WorldStatePacket { Tick = _tick };
 
-            // Copy to locals – ref params can't be captured in nested lambdas
-            int obsX = observerPos.TileX;
-            int obsY = observerPos.TileY;
+            int obsX  = observerPos.TileX;
+            int obsY  = observerPos.TileY;
             byte obsZ = observerPos.FloorZ;
 
             // Add visible players

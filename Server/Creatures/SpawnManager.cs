@@ -3,12 +3,15 @@ using Arch.Core;
 using Microsoft.Extensions.Logging;
 using Server.ECS;
 using Server.Maps;
+using Shared.Creatures;
 
 namespace Server.Creatures;
 
 /// <summary>
 /// Manages creature spawn points: initial spawn on startup and
 /// periodic respawn after a creature dies.
+///
+/// Canary equivalent: game/game.cpp placeCreature() + spawn XML loading.
 /// </summary>
 public sealed class SpawnManager
 {
@@ -16,10 +19,9 @@ public sealed class SpawnManager
     private readonly ServerWorld           _world;
     private readonly CreatureDatabase      _db;
     private readonly MapLoader             _mapLoader;
-    private CreatureAiSystem?          _aiSystem;
+    private CreatureAiSystem?              _aiSystem;
     private readonly Random                _rng = new();
 
-    // SlotKey is named differently from SpawnPoint to avoid CS0102
     private readonly record struct SlotKey(int SpawnIndex, int SlotIndex);
 
     private readonly List<SpawnPoint>             _points    = new();
@@ -133,16 +135,15 @@ public sealed class SpawnManager
             return;
         }
 
-        var entity = _world.SpawnCreature(
-            creatureId: template.Id,
-            tileX:      tx,
-            tileY:      ty,
-            maxHp:      template.MaxHP,
-            aggressive: template.Behavior != Shared.Creatures.CreatureBehavior.Passive,
-            floorZ:     pt.Floor);
+        // ── BUG FIX: use the overload that copies ALL template fields ──────
+        // The old overload (ushort creatureId, int tileX, int tileY, int maxHp, bool aggressive)
+        // did NOT copy AttackMin/Max, LookRange, ChaseRange, Armor, Defense, Name, etc.
+        // This caused creatures to have LookRange=0 (never aggro) and AttackMin/Max=0 (0 damage).
+        var entity = _world.SpawnCreature(template, tx, ty, pt.Floor);
 
         _alive[key] = entity;
-        _logger.LogDebug("Spawned {Name} at ({X},{Y}) floor {F}.", template.Name, tx, ty, pt.Floor);
+        _logger.LogDebug("Spawned {Name} at ({X},{Y}) floor {F} HP={HP} ATK={Min}-{Max} LookRange={LR}.",
+            template.Name, tx, ty, pt.Floor, template.MaxHP, template.AttackMin, template.AttackMax, template.LookRange);
     }
 
     private bool IsTileWalkable(int tx, int ty, byte floor)
