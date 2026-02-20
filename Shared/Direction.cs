@@ -40,4 +40,18 @@ public static class DirectionHelper
         return dir is Direction.NorthEast or Direction.SouthEast
                    or Direction.SouthWest or Direction.NorthWest;
     }
+
+    public static Direction FromOffset(int dx, int dy) => (dx, dy) switch
+    {
+        ( 0, -1) => Direction.North,
+        ( 1, -1) => Direction.NorthEast,
+        ( 1,  0) => Direction.East,
+        ( 1,  1) => Direction.SouthEast,
+        ( 0,  1) => Direction.South,
+        (-1,  1) => Direction.SouthWest,
+        (-1,  0) => Direction.West,
+        (-1, -1) => Direction.NorthWest,
+        _        => Direction.South,
+    };
+
 }
