@@ -1,3 +1,6 @@
+using Server.Maps;
+using Server.Events;
+using Server.Spatial;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Server.Core;
@@ -10,15 +13,19 @@ var services = new ServiceCollection();
 
 services.AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
 
-services.AddSingleton<World>();
+services.AddSingleton<ServerWorld>();
+services.AddSingleton<EventBus>();
+services.AddSingleton<SpatialHashGrid>();
+services.AddSingleton<MapLoader>();
 services.AddSingleton<PlayerService>();
 services.AddSingleton<MovementSystem>();
+services.AddSingleton<StatsSystem>();
 services.AddSingleton<NetworkManager>();
 services.AddSingleton<GameLoop>();
 
 var provider = services.BuildServiceProvider();
 
-var network  = provider.GetRequiredService<NetworkManager>();
+var network = provider.GetRequiredService<NetworkManager>();
 network.Start();
 
 var cts = new CancellationTokenSource();

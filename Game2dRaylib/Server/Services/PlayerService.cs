@@ -1,30 +1,32 @@
+using Arch.Core.Extensions;
 using Server.ECS;
 using Server.ECS.Components;
+using Shared;
 using Shared.Packets;
 
 namespace Server.Services;
 
+/// <summary>
+/// Applies validated, sequenced player inputs to the ECS world.
+/// Sequence validation is performed upstream in NetworkManager.
+/// </summary>
 public class PlayerService
 {
-    public void ApplyInput(int networkId, InputPacket input, World world)
+    /// <summary>Queues the requested direction from a MoveRequestPacket.</summary>
+    public void ApplyMoveRequest(int networkId, MoveRequestPacket request, ServerWorld world)
     {
-        foreach (var entity in world.GetEntitiesWith<NetworkIdComponent>())
-        {
-            if (entity.GetComponent<NetworkIdComponent>().Id != networkId) continue;
-            var ic    = entity.GetComponent<InputComponent>();
-            ic.Up     = input.Up;
-            ic.Down   = input.Down;
-            ic.Left   = input.Left;
-            ic.Right  = input.Right;
-            ic.Tick   = input.Tick;
-            break;
-        }
+        var entity = world.FindPlayer(networkId);
+        if (entity == Arch.Core.Entity.Null) return;
+
+        ref var queue = ref entity.Get<MovementQueueComponent>();
+        var dir = (Direction)request.Direction;
+        queue.QueuedDirection = (byte)dir;
     }
 
-    public void RemovePlayer(int networkId, World world)
+    public void RemovePlayer(int networkId, ServerWorld world)
     {
-        var entity = world.GetEntitiesWith<NetworkIdComponent>()
-            .FirstOrDefault(e => e.GetComponent<NetworkIdComponent>().Id == networkId);
-        if (entity != null) world.RemoveEntity(entity);
+        var entity = world.FindPlayer(networkId);
+        if (entity != Arch.Core.Entity.Null)
+            world.DestroyEntity(entity);
     }
 }

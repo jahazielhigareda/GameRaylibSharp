@@ -1,6 +1,6 @@
 namespace Client.ECS.Components;
 
-public class NetworkIdComponent
+public struct NetworkIdComponent
 {
-    public int Id { get; set; }
+    public int Id;
 }
