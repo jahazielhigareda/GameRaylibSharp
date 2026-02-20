@@ -30,9 +30,13 @@ public sealed class CreatureAiSystem : ISystem
     private readonly ServerWorld              _world;
     private readonly ILogger<CreatureAiSystem> _logger;
     private readonly PathCache                _pathCache = new();
+    private CombatSystem?                 _combatSystem;
 
     /// <summary>Exposed so SpawnManager can invalidate on creature death.</summary>
     public PathCache PathCache => _pathCache;
+
+    /// <summary>Wire in after DI to delegate attack damage to CombatSystem.</summary>
+    public void SetCombatSystem(CombatSystem cs) => _combatSystem = cs;
     private MapData?                          _mapData;
     private readonly Random                   _rng = new();
 
@@ -295,14 +299,19 @@ public sealed class CreatureAiSystem : ISystem
     private void ExecuteAttack(ref CreatureComponent creature, ref CreatureAiComponent ai)
     {
         if (!ai.TargetEntity.IsAlive()) return;
-        if (!ai.TargetEntity.Has<StatsComponent>()) return;
 
-        int dmg = _rng.Next(creature.AttackMin, creature.AttackMax + 1);
-        ref var targetStats = ref ai.TargetEntity.Get<StatsComponent>();
-        targetStats.CurrentHP = Math.Max(0, targetStats.CurrentHP - dmg);
-
-        _logger.LogDebug("Creature {Id} deals {Dmg} dmg (target HP={HP})",
-            creature.CreatureId, dmg, targetStats.CurrentHP);
+        if (_combatSystem != null)
+        {
+            _combatSystem.ApplyCreatureAttack(ref creature, ai.TargetEntity);
+        }
+        else
+        {
+            // Fallback if CombatSystem not yet wired (e.g. during tests)
+            if (!ai.TargetEntity.Has<StatsComponent>()) return;
+            int dmg = _rng.Next(creature.AttackMin, creature.AttackMax + 1);
+            ref var targetStats = ref ai.TargetEntity.Get<StatsComponent>();
+            targetStats.CurrentHP = Math.Max(0, targetStats.CurrentHP - dmg);
+        }
     }
 
     // ── Spatial helpers ───────────────────────────────────────────────────────

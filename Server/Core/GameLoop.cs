@@ -21,6 +21,7 @@ public class GameLoop
     private readonly ServerWorld       _world;
     private readonly MovementSystem    _movementSystem;
     private readonly CreatureAiSystem   _creatureAiSystem;
+    private readonly CombatSystem       _combatSystem;
     private readonly StatsSystem       _statsSystem;
     private readonly NetworkManager    _networkManager;
     private readonly EventBus          _eventBus;
@@ -43,7 +44,8 @@ public class GameLoop
         SpatialHashGrid spatialGrid,
         MapLoader mapLoader,
         SpawnManager spawnManager,
-        CreatureAiSystem creatureAiSystem)
+        CreatureAiSystem creatureAiSystem,
+        CombatSystem combatSystem)
     {
         _logger         = logger;
         _world          = world;
@@ -55,6 +57,8 @@ public class GameLoop
         _mapLoader      = mapLoader;
         _spawnManager       = spawnManager;
         _creatureAiSystem   = creatureAiSystem;
+        _combatSystem      = combatSystem;
+        _combatSystem      = combatSystem;
         _spatialGrid.SetEventBus(eventBus);
     }
 
@@ -70,6 +74,7 @@ public class GameLoop
 
         // Spawn creatures
         _spawnManager.SetAiSystem(_creatureAiSystem);
+        _creatureAiSystem.SetCombatSystem(_combatSystem);
         _spawnManager.RegisterDefaultSpawns();
         _spawnManager.SpawnAll();
 
@@ -90,6 +95,7 @@ public class GameLoop
             while (accumulator >= targetDelta)
             {
                 _creatureAiSystem.Update((float)targetDelta);
+            _combatSystem.Update((float)targetDelta);
             _movementSystem.Update((float)targetDelta);
             _spawnManager.Update((float)targetDelta);
                 _statsSystem.Update((float)targetDelta);

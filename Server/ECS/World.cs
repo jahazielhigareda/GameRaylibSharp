@@ -63,7 +63,8 @@ public sealed class ServerWorld : IDisposable
             new SpeedComponent(),
             new MovementQueueComponent(),
             stats,
-            new SkillsComponent());
+            new SkillsComponent(),
+            new CombatComponent());
     }
 
     /// <summary>Spawn a creature archetype.</summary>

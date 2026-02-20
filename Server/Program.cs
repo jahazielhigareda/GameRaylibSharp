@@ -21,6 +21,7 @@ services.AddSingleton<MapLoader>();
 services.AddSingleton<PlayerService>();
 services.AddSingleton<MovementSystem>();
 services.AddSingleton<CreatureAiSystem>();
+services.AddSingleton<CombatSystem>();
 services.AddSingleton<StatsSystem>();
 services.AddSingleton<NetworkManager>();
 services.AddSingleton<CreatureDatabase>();
