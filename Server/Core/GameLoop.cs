@@ -20,18 +20,18 @@ public class GameLoop
     private readonly ILogger<GameLoop> _logger;
     private readonly ServerWorld       _world;
     private readonly MovementSystem    _movementSystem;
-    private readonly CreatureAiSystem   _creatureAiSystem;
-    private readonly CombatSystem       _combatSystem;
+    private readonly CreatureAiSystem  _creatureAiSystem;
+    private readonly CombatSystem      _combatSystem;
     private readonly StatsSystem       _statsSystem;
     private readonly NetworkManager    _networkManager;
     private readonly EventBus          _eventBus;
     private readonly SpatialHashGrid   _spatialGrid;
     private readonly MapLoader         _mapLoader;
+    private readonly SpawnManager      _spawnManager;
 
-    private readonly SpawnManager    _spawnManager;
     private MapData? _mapData;
-    private int   _tick;
-    private float _statsTimer;
+    private int      _tick;
+    private float    _statsTimer;
     private const float StatsBroadcastInterval = 1.0f;
 
     public GameLoop(
@@ -47,24 +47,22 @@ public class GameLoop
         CreatureAiSystem creatureAiSystem,
         CombatSystem combatSystem)
     {
-        _logger         = logger;
-        _world          = world;
-        _movementSystem = movementSystem;
-        _statsSystem    = statsSystem;
-        _networkManager = networkManager;
-        _eventBus       = eventBus;
-        _spatialGrid    = spatialGrid;
-        _mapLoader      = mapLoader;
-        _spawnManager       = spawnManager;
-        _creatureAiSystem   = creatureAiSystem;
-        _combatSystem      = combatSystem;
-        _combatSystem      = combatSystem;
+        _logger           = logger;
+        _world            = world;
+        _movementSystem   = movementSystem;
+        _statsSystem      = statsSystem;
+        _networkManager   = networkManager;
+        _eventBus         = eventBus;
+        _spatialGrid      = spatialGrid;
+        _mapLoader        = mapLoader;
+        _spawnManager     = spawnManager;
+        _creatureAiSystem = creatureAiSystem;
+        _combatSystem     = combatSystem;
         _spatialGrid.SetEventBus(eventBus);
     }
 
     public void Run(CancellationToken token)
     {
-        // ── Load map ─────────────────────────────────────────────────────
         string mapPath = Path.Combine(AppContext.BaseDirectory, "world.map");
         _mapData = _mapLoader.Load(mapPath);
         _movementSystem.SetMapData(_mapData);
@@ -72,7 +70,6 @@ public class GameLoop
         _networkManager.SetMapData(_mapData);
         _movementSystem.NetworkManager = _networkManager;
 
-        // Spawn creatures
         _spawnManager.SetAiSystem(_creatureAiSystem);
         _creatureAiSystem.SetCombatSystem(_combatSystem);
         _spawnManager.RegisterDefaultSpawns();
@@ -95,9 +92,9 @@ public class GameLoop
             while (accumulator >= targetDelta)
             {
                 _creatureAiSystem.Update((float)targetDelta);
-            _combatSystem.Update((float)targetDelta);
-            _movementSystem.Update((float)targetDelta);
-            _spawnManager.Update((float)targetDelta);
+                _combatSystem.Update((float)targetDelta);
+                _movementSystem.Update((float)targetDelta);
+                _spawnManager.Update((float)targetDelta);
                 _statsSystem.Update((float)targetDelta);
                 BroadcastState();
                 BroadcastStatsIfNeeded((float)targetDelta);
@@ -111,7 +108,7 @@ public class GameLoop
 
     private void BroadcastState()
     {
-        // ── Rebuild spatial hash every tick ───────────────────────────────
+        // Rebuild spatial hash every tick
         _spatialGrid.Clear();
         _world.ForEachNetworked((ref NetworkIdComponent nid, ref PositionComponent pos) =>
         {
@@ -120,12 +117,18 @@ public class GameLoop
                 _spatialGrid.Add(entity, pos.TileX, pos.TileY);
         });
 
-        // ── Build per-player WorldStatePacket containing only visible entities ──
+        // Build per-player WorldStatePacket containing only visible entities
         _world.ForEachNetworked((ref NetworkIdComponent observerNid, ref PositionComponent observerPos) =>
         {
             var packet = new WorldStatePacket { Tick = _tick };
 
-            foreach (var visibleEntity in _spatialGrid.GetVisible(observerPos.TileX, observerPos.TileY))
+            // Copy to locals – ref params can't be captured in nested lambdas
+            int obsX = observerPos.TileX;
+            int obsY = observerPos.TileY;
+            byte obsZ = observerPos.FloorZ;
+
+            // Add visible players
+            foreach (var visibleEntity in _spatialGrid.GetVisible(obsX, obsY))
             {
                 if (!visibleEntity.IsAlive()) continue;
                 if (!visibleEntity.Has<NetworkIdComponent>()) continue;
@@ -136,13 +139,46 @@ public class GameLoop
 
                 packet.Players.Add(new PlayerSnapshot
                 {
-                    Id    = vNid.Id,
-                    TileX = vPos.TileX,
-                    TileY = vPos.TileY,
-                    X     = vPos.VisualX,
-                    Y     = vPos.VisualY
+                    Id         = vNid.Id,
+                    TileX      = vPos.TileX,
+                    TileY      = vPos.TileY,
+                    X          = vPos.VisualX,
+                    Y          = vPos.VisualY,
+                    EntityType = Shared.Packets.SnapshotEntityType.Player,
                 });
             }
+
+            // Add visible creatures
+            _world.World.Query(
+                new Arch.Core.QueryDescription()
+                    .WithAll<CreatureTag, CreatureNetworkIdComponent, PositionComponent, CreatureComponent>(),
+                (Entity ce,
+                 ref CreatureNetworkIdComponent cnid,
+                 ref PositionComponent cpos,
+                 ref CreatureComponent ccomp) =>
+                {
+                    if (cpos.FloorZ != obsZ) return;
+                    int cdx = Math.Abs(cpos.TileX - obsX);
+                    int cdy = Math.Abs(cpos.TileY - obsY);
+                    if (cdx > Constants.ViewRange || cdy > Constants.ViewRange) return;
+                    if (ccomp.CurrentHP <= 0) return;
+
+                    byte hpPct = ccomp.MaxHP > 0
+                        ? (byte)Math.Clamp(ccomp.CurrentHP * 100 / ccomp.MaxHP, 0, 100)
+                        : (byte)0;
+
+                    packet.Players.Add(new PlayerSnapshot
+                    {
+                        Id         = cnid.Id,
+                        TileX      = cpos.TileX,
+                        TileY      = cpos.TileY,
+                        X          = cpos.VisualX,
+                        Y          = cpos.VisualY,
+                        EntityType = Shared.Packets.SnapshotEntityType.Creature,
+                        HpPct      = hpPct,
+                        CreatureId = ccomp.CreatureId,
+                    });
+                });
 
             _networkManager.SendWorldStateToPlayer(observerNid.Id, packet);
         });

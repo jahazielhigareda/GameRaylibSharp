@@ -71,7 +71,22 @@ public sealed class CombatSystem : ISystem
             bool isDistance = combat.WeaponSkillType == WeaponSkillType.Distance;
             int maxRange    = isDistance ? 7 : 1;
 
-            if (dist > maxRange) return; // too far — auto-walk handled by targeting system
+            if (dist > maxRange)
+            {
+                // Auto-walk toward target when out of attack range
+                if (playerEntity.Has<MovementQueueComponent>())
+                {
+                    ref var mq = ref playerEntity.Get<MovementQueueComponent>();
+                    int dx = creaturePos.TileX - pos.TileX;
+                    int dy = creaturePos.TileY - pos.TileY;
+                    var stepDir = Shared.DirectionHelper.FromOffset(
+                        dx == 0 ? 0 : (dx > 0 ? 1 : -1),
+                        dy == 0 ? 0 : (dy > 0 ? 1 : -1));
+                    if (mq.QueuedDirection == (byte)Shared.Direction.None)
+                        mq.QueuedDirection = (byte)stepDir;
+                }
+                return;
+            }
 
             // ── Calculate damage ────────────────────────────────────────
             int damage;

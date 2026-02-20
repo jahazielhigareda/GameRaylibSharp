@@ -10,6 +10,7 @@ public static class Constants
     // Tile-based movement (estilo Tibia)
     public const int    TileSize       = 32;
     public const int    PlayerSize     = 28;
+    public const int CreatureSize = PlayerSize;
     public const float  BaseSpeed      = 150f;
     public const float  DiagonalFactor = 1.414f;
 
@@ -21,6 +22,7 @@ public static class Constants
     public const int ViewportTilesX = 15;  // Tiles visibles horizontalmente
     public const int ViewportTilesY = 11;  // Tiles visibles verticalmente
     public const int ViewportMargin = 2;   // Margen extra para pre-renderizar
+    public const int ViewRange = ViewportTilesX / 2 + ViewportMargin;
 
     // ========== STATS SYSTEM (Tibia-style) ==========
 

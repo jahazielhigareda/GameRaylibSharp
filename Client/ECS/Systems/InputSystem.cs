@@ -1,4 +1,9 @@
+using Arch.Core;
+using Arch.Core.Extensions;
+using Client.ECS;
+using Client.ECS.Components;
 using Client.Network;
+using Client.Services;
 using Raylib_cs;
 using Shared;
 using Shared.Packets;
@@ -6,21 +11,87 @@ using Shared.Packets;
 namespace Client.ECS.Systems;
 
 /// <summary>
-/// Tibia-style input system – 8-directional, key-repeat, sends MoveRequestPacket.
-/// The MoveRequestPacket.Sequence field is stamped by
-/// ClientNetworkManager.SendMoveRequest, so this system does not manage it.
+/// Tibia-style input system – 8-directional movement + click-to-target.
+///
+/// Left-click  on a creature  → send TargetRequestPacket (target it)
+/// Right-click anywhere       → clear current target
+/// WASD/Arrows                → movement (MoveRequestPacket)
 /// </summary>
 public class InputSystem : ISystem
 {
     private readonly ClientNetworkManager _network;
-    private int       _tick;
+    private readonly ClientWorld          _world;
+    private readonly CameraService        _camera;
+    private readonly GameStateService     _state;
+
+    private int   _tick;
     private Direction _lastSentDirection = Direction.None;
-    private float     _repeatTimer;
+    private float _repeatTimer;
     private const float RepeatInterval = 0.08f;
 
-    public InputSystem(ClientNetworkManager network) => _network = network;
+    // Arch query to find creature entities
+    private static readonly QueryDescription CreatureQuery = new QueryDescription()
+        .WithAll<NetworkIdComponent, PositionComponent, RenderComponent, CreatureClientTag>();
+
+    public InputSystem(ClientNetworkManager network, ClientWorld world,
+                       CameraService camera, GameStateService state)
+    {
+        _network = network;
+        _world   = world;
+        _camera  = camera;
+        _state   = state;
+    }
 
     public void Update(float deltaTime)
+    {
+        HandleClickTargeting();
+        HandleMovement(deltaTime);
+    }
+
+    // ── Click-to-target ───────────────────────────────────────────────────
+
+    private void HandleClickTargeting()
+    {
+        // Right-click clears target
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right))
+        {
+            _state.TargetedEntityId = 0;
+            _network.SendTargetRequest(0);
+            return;
+        }
+
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+
+        var (offsetX, offsetY) = _camera.GetOffset();
+        var mousePos = Raylib.GetMousePosition();
+        int ts = Constants.TileSize;
+
+        int clickedNetId = 0;
+
+        _world.World.Query(in CreatureQuery,
+            (Entity e, ref NetworkIdComponent nid, ref PositionComponent pos, ref RenderComponent render) =>
+            {
+                // Already found one this frame
+                if (clickedNetId != 0) return;
+
+                float drawX = pos.X + offsetX + (ts - render.Size) / 2f;
+                float drawY = pos.Y + offsetY + (ts - render.Size) / 2f;
+
+                var bounds = new Rectangle(drawX, drawY, render.Size, render.Size);
+                if (Raylib.CheckCollisionPointRec(mousePos, bounds))
+                    clickedNetId = nid.Id;
+            });
+
+        if (clickedNetId != 0)
+        {
+            _state.TargetedEntityId = clickedNetId;
+            _network.SendTargetRequest(clickedNetId);
+        }
+    }
+
+    // ── Movement ──────────────────────────────────────────────────────────
+
+    private void HandleMovement(float deltaTime)
     {
         var dir = GetCurrentDirection();
 
@@ -71,6 +142,5 @@ public class InputSystem : ISystem
         {
             Direction = (byte)dir,
             Tick      = _tick++
-            // Sequence is stamped inside ClientNetworkManager.SendMoveRequest
         });
 }
