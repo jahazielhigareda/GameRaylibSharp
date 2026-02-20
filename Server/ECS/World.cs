@@ -11,6 +11,7 @@ namespace Server.ECS;
 /// </summary>
 public sealed class ServerWorld : IDisposable
 {
+    private int _nextCreatureNetId = 10_000; // offset from player IDs
     public readonly Arch.Core.World World;
 
     public ServerWorld() { World = Arch.Core.World.Create(); }
@@ -78,6 +79,7 @@ public sealed class ServerWorld : IDisposable
 
         return World.Create(
             new CreatureTag(),
+            new CreatureNetworkIdComponent { Id = _nextCreatureNetId++ },
             pos,
             new SpeedComponent(),
             new MovementQueueComponent(),
@@ -110,6 +112,7 @@ public sealed class ServerWorld : IDisposable
 
         return World.Create(
             new CreatureTag(),
+            new CreatureNetworkIdComponent { Id = _nextCreatureNetId++ },
             pos,
             new SpeedComponent(),
             new MovementQueueComponent(),
@@ -244,6 +247,19 @@ public sealed class ServerWorld : IDisposable
             (ref NetworkIdComponent nid, ref StatsComponent stats,
              ref SpeedComponent spd, ref SkillsComponent skills)
                 => action(ref nid, ref stats, ref spd, ref skills));
+    }
+
+
+    /// <summary>Find a creature entity by its network id.</summary>
+    public Entity FindCreatureByNetId(int netId)
+    {
+        Entity found = Entity.Null;
+        World.Query(new Arch.Core.QueryDescription().WithAll<CreatureTag, CreatureNetworkIdComponent>(),
+            (Entity e, ref CreatureNetworkIdComponent cnid) =>
+            {
+                if (cnid.Id == netId) found = e;
+            });
+        return found;
     }
 
     public void Dispose() => Arch.Core.World.Destroy(World);

@@ -12,4 +12,5 @@ public enum PacketType : byte
     WorldDeltaPacket         = 8,   // delta snapshot
     FloorChangePacket        = 9,
     MapDataPacket            = 10,
+    TargetRequestPacket      = 11,  // client → server: target a creature
 }

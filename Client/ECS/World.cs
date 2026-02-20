@@ -35,6 +35,9 @@ public sealed class ClientWorld : IDisposable
     private static readonly QueryDescription RenderQuery = new QueryDescription()
         .WithAll<PositionComponent, RenderComponent>();
 
+    private static readonly QueryDescription CreatureQuery = new QueryDescription()
+        .WithAll<NetworkIdComponent, PositionComponent, RenderComponent, CreatureClientTag>();
+
     private static readonly QueryDescription EffectQuery = new QueryDescription()
         .WithAll<PositionComponent, EffectComponent>();
 
@@ -62,6 +65,46 @@ public sealed class ClientWorld : IDisposable
             new PositionComponent(),
             new RenderComponent { Color = color, Size = Constants.PlayerSize },
             new CreatureRenderOrder());
+    }
+
+
+    /// <summary>Creates or updates a remote creature entity from a server snapshot.</summary>
+    public void UpsertCreature(int netId, int tileX, int tileY, float x, float y, byte hpPct)
+    {
+        // Try to find existing
+        Entity found = Entity.Null;
+        World.Query(in CreatureQuery, (Entity e, ref NetworkIdComponent nid) =>
+        {
+            if (nid.Id == netId) found = e;
+        });
+
+        if (found == Entity.Null)
+        {
+            found = World.Create(
+                new NetworkIdComponent { Id = netId },
+                new PositionComponent(),
+                new RenderComponent { Color = Raylib_cs.Color.Orange, Size = Constants.CreatureSize },
+                new CreatureRenderOrder(),
+                new CreatureClientTag(),
+                new CreatureHpComponent());
+        }
+
+        ref var pos = ref found.Get<PositionComponent>();
+        pos.SetFromServer(tileX, tileY, x, y);
+        if (pos.X == 0 && pos.Y == 0) pos.SnapToTarget();
+
+        if (found.Has<CreatureHpComponent>())
+            found.Get<CreatureHpComponent>().HpPct = hpPct;
+    }
+
+    public void RemoveCreature(int netId)
+    {
+        Entity found = Entity.Null;
+        World.Query(in CreatureQuery, (Entity e, ref NetworkIdComponent nid) =>
+        {
+            if (nid.Id == netId) found = e;
+        });
+        if (found != Entity.Null) World.Destroy(found);
     }
 
     public void DestroyEntity(Entity entity) => World.Destroy(entity);

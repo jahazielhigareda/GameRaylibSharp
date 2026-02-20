@@ -21,7 +21,7 @@ public class ClientNetworkManager : IDisposable
     private readonly GameStateService              _state;
     private NetPeer? _server;
     private TileRenderSystem? _tileRenderSystem;
-    private TileCell[,,]?     _pendingGrid;        // cache si TRS no está listo
+    private TileCell[,,]?     _pendingGrid;        // cache si TRS no estï¿½ listo
     private byte              _pendingGroundFloor;
 
     private ushort _moveSequence;
@@ -70,6 +70,15 @@ public class ClientNetworkManager : IDisposable
         var writer = new NetDataWriter();
         writer.Put(data);
         _server.Send(writer, DeliveryMethod.ReliableOrdered);
+    }
+
+    public void SendTargetRequest(int creatureNetId)
+    {
+        var data = PacketSerializer.Serialize(
+            new TargetRequestPacket { CreatureNetId = creatureNetId });
+        var writer = new LiteNetLib.Utils.NetDataWriter();
+        writer.Put(data);
+        _server?.Send(writer, LiteNetLib.DeliveryMethod.ReliableOrdered);
     }
 
     private void OnReceive(NetPeer peer, NetPacketReader reader,

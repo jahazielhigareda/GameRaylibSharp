@@ -123,6 +123,7 @@ public static class PacketSerializer
             nameof(SkillsUpdatePacket)       => PacketType.SkillsUpdatePacket,
             nameof(FloorChangePacket)        => PacketType.FloorChangePacket,
             nameof(MapDataPacket)            => PacketType.MapDataPacket,
+            nameof(TargetRequestPacket)     => PacketType.TargetRequestPacket,
             _ => throw new InvalidOperationException($"Unknown packet type: {typeof(T).Name}")
         };
 }

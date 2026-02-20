@@ -52,7 +52,13 @@ public class HudSystem : ISystem
             DrawSkillsPanel(in skills, sw, sh);
         }
 
-        Raylib.DrawText("WASD/Arrows: Move | K: Skills", 10, sh - 30, 16, Color.LightGray);
+        // Target indicator
+        if (_state.TargetedEntityId != 0)
+        {
+            Raylib.DrawText($"Target ID: {_state.TargetedEntityId}", 10, sh - 55, 16, Raylib_cs.Color.Red);
+        }
+
+        Raylib.DrawText("WASD/Arrows: Move | K: Skills | LClick: Target | RClick: Clear target", 10, sh - 30, 16, Color.LightGray);
     }
 
     private static void DrawStatsPanel(in StatsDataComponent stats, int sw, int sh)

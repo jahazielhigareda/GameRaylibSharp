@@ -13,18 +13,6 @@ using Shared.Packets;
 
 namespace Server.Network;
 
-/// <summary>
-/// Server-side LiteNetLib network manager.
-///
-/// Changes vs. original:
-/// - Uses PacketSerializer with the new 5-byte framed header.
-/// - Maintains a PeerSessionState per connected peer:
-///     * Per-peer rate limiting (PeerRateLimiter).
-///     * Per-stream sequence number validation for movement packets.
-///     * Per-client WorldState delta baseline for delta compression.
-/// - Sends WorldDeltaPacket when possible; full WorldStatePacket for new /
-///   resync clients.
-/// </summary>
 public class NetworkManager : IDisposable
 {
     private readonly EventBasedNetListener       _listener;
@@ -40,7 +28,6 @@ public class NetworkManager : IDisposable
     private int      _nextNetworkId = 1;
     private MapData? _currentMap;
 
-    /// <summary>Call from GameLoop after map is loaded so new peers get the map.</summary>
     public void SetMapData(MapData map) => _currentMap = map;
 
     private const int MaxPacketsPerSecond = 120;
@@ -80,9 +67,7 @@ public class NetworkManager : IDisposable
         int netId = _nextNetworkId++;
         _peers[netId]         = peer;
         _peerToNetId[peer.Id] = netId;
-        _sessions[netId]      = new PeerSessionState(netId,
-                                                       MaxPacketsPerSecond,
-                                                       AbuseThreshold);
+        _sessions[netId]      = new PeerSessionState(netId, MaxPacketsPerSecond, AbuseThreshold);
 
         int spawnX = Constants.MapWidth  / 2;
         int spawnY = Constants.MapHeight / 2;
@@ -95,7 +80,6 @@ public class NetworkManager : IDisposable
         writer.Put(data);
         peer.Send(writer, DeliveryMethod.ReliableOrdered);
 
-        // Send map data immediately after join so client can render tiles
         if (_currentMap != null)
             SendMapData(peer, _currentMap);
     }
@@ -128,21 +112,17 @@ public class NetworkManager : IDisposable
 
         var session = _sessions[netId];
 
-        // 1. Rate limiting
         if (!session.RateLimiter.TryAccept())
         {
             _logger.LogDebug("Rate limit: dropping packet from peer {NetId}", netId);
-
             if (session.RateLimiter.ShouldDisconnect)
             {
-                _logger.LogWarning(
-                    "Peer {NetId} exceeded abuse threshold – disconnecting", netId);
+                _logger.LogWarning("Peer {NetId} exceeded abuse threshold – disconnecting", netId);
                 peer.Disconnect();
             }
             return;
         }
 
-        // 2. Parse packet header
         NetworkPacket packet;
         try
         {
@@ -154,7 +134,6 @@ public class NetworkManager : IDisposable
             return;
         }
 
-        // 3. Protocol version check (log mismatch but still process via registry fallback)
         if (packet.ProtocolVersion != NetworkPacket.CurrentVersion)
         {
             _logger.LogWarning(
@@ -162,11 +141,14 @@ public class NetworkManager : IDisposable
                 netId, packet.ProtocolVersion, NetworkPacket.CurrentVersion);
         }
 
-        // 4. Dispatch
         switch (packet.Type)
         {
             case PacketType.MoveRequestPacket:
                 HandleMoveRequest(packet, netId, session);
+                break;
+
+            case PacketType.TargetRequestPacket:
+                HandleTargetRequest(packet, netId);
                 break;
 
             default:
@@ -191,7 +173,6 @@ public class NetworkManager : IDisposable
             return;
         }
 
-        // Sequence number check – drop duplicates / replays
         if (!session.IsSequenceAcceptable(StreamId.Movement, moveReq.Sequence))
         {
             _logger.LogDebug(
@@ -203,12 +184,42 @@ public class NetworkManager : IDisposable
         _playerService.ApplyMoveRequest(netId, moveReq, _world);
     }
 
+    private void HandleTargetRequest(NetworkPacket packet, int netId)
+    {
+        TargetRequestPacket req;
+        try { req = PacketSerializer.ParsePacket<TargetRequestPacket>(packet); }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Bad TargetRequest from {NetId}: {Ex}", netId, ex.Message);
+            return;
+        }
+
+        var playerEntity = _world.FindPlayer(netId);
+        if (playerEntity == Arch.Core.Entity.Null) return;
+        if (!playerEntity.Has<CombatComponent>()) return;
+
+        ref var combat = ref playerEntity.Get<CombatComponent>();
+
+        if (req.CreatureNetId == 0)
+        {
+            combat.TargetEntity = Arch.Core.Entity.Null;
+            _logger.LogDebug("Player {NetId} cleared target.", netId);
+            return;
+        }
+
+        var creatureEntity = _world.FindCreatureByNetId(req.CreatureNetId);
+        if (creatureEntity == Arch.Core.Entity.Null)
+        {
+            _logger.LogDebug("Player {NetId} targeted unknown creature {CId}.", netId, req.CreatureNetId);
+            return;
+        }
+
+        combat.TargetEntity = creatureEntity;
+        _logger.LogDebug("Player {NetId} targeted creature {CId}.", netId, req.CreatureNetId);
+    }
+
     // ── Broadcast helpers ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// Broadcasts the current WorldState to all connected peers.
-    /// Sends a delta packet where possible; full snapshot for new/desynced clients.
-    /// </summary>
     public void BroadcastWorldState(WorldStatePacket packet)
     {
         foreach (var (netId, peer) in _peers)
@@ -219,15 +230,9 @@ public class NetworkManager : IDisposable
 
             byte[] data;
             if (update is WorldDeltaPacket delta)
-            {
-                data = PacketSerializer.BuildPacket(
-                    delta, PacketType.WorldDeltaPacket, compress: true);
-            }
+                data = PacketSerializer.BuildPacket(delta, PacketType.WorldDeltaPacket, compress: true);
             else
-            {
-                data = PacketSerializer.BuildPacket(
-                    (WorldStatePacket)update, PacketType.WorldStatePacket, compress: true);
-            }
+                data = PacketSerializer.BuildPacket((WorldStatePacket)update, PacketType.WorldStatePacket, compress: true);
 
             var writer = new NetDataWriter();
             writer.Put(data);
@@ -235,11 +240,6 @@ public class NetworkManager : IDisposable
         }
     }
 
-
-    /// <summary>
-    /// Sends a per-player (AoI-filtered) WorldStatePacket to a single peer.
-    /// Uses the same delta-compression pipeline as BroadcastWorldState.
-    /// </summary>
     public void SendWorldStateToPlayer(int networkId, WorldStatePacket packet)
     {
         if (!_peers.TryGetValue(networkId, out var peer)) return;
@@ -249,20 +249,15 @@ public class NetworkManager : IDisposable
 
         byte[] data;
         if (update is WorldDeltaPacket delta)
-        {
-            data = PacketSerializer.BuildPacket(
-                delta, PacketType.WorldDeltaPacket, compress: true);
-        }
+            data = PacketSerializer.BuildPacket(delta, PacketType.WorldDeltaPacket, compress: true);
         else
-        {
-            data = PacketSerializer.BuildPacket(
-                (WorldStatePacket)update, PacketType.WorldStatePacket, compress: true);
-        }
+            data = PacketSerializer.BuildPacket((WorldStatePacket)update, PacketType.WorldStatePacket, compress: true);
 
-        var writer = new LiteNetLib.Utils.NetDataWriter();
+        var writer = new NetDataWriter();
         writer.Put(data);
-        peer.Send(writer, LiteNetLib.DeliveryMethod.Unreliable);
+        peer.Send(writer, DeliveryMethod.Unreliable);
     }
+
     public void SendStatsToPlayer(int networkId, StatsUpdatePacket packet)
     {
         if (!_peers.TryGetValue(networkId, out var peer)) return;
@@ -289,7 +284,7 @@ public class NetworkManager : IDisposable
 
     private static void SendMapData(NetPeer peer, MapData map)
     {
-        int total = map.Width * map.Height * map.Floors;
+        int total     = map.Width * map.Height * map.Floors;
         var groundIds = new ushort[total];
         var flags     = new ushort[total];
         for (int z = 0; z < map.Floors;  z++)
