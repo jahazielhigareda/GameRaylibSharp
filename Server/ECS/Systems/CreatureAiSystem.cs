@@ -6,17 +6,16 @@ using Server.ECS;
 using Server.ECS.Components;
 using Server.Maps;
 using Shared;
-using Server.Combat;
 
 namespace Server.ECS.Systems;
 
 /// <summary>
 /// Per-tick FSM update for all creature entities.
-/// Uses the optimized <see cref="AStarPathfinder"/> with <see cref="PathCache"/>
-/// to avoid running A* every single tick.
+///
+/// Canary equivalent: game/game.cpp Game::checkCreatureMove() / creature AI
 ///
 /// State machine:
-///   IDLE    -> ALERT   : player enters lookRange
+///   IDLE    -> ALERT   : player enters lookRange (+ LoS check)
 ///   ALERT   -> CHASE   : 0.5 s delay elapses
 ///   CHASE   -> ATTACK  : player within melee range (1 tile)
 ///   CHASE   -> RETURN  : player out of chaseRange or target gone
@@ -28,18 +27,12 @@ namespace Server.ECS.Systems;
 /// </summary>
 public sealed class CreatureAiSystem : ISystem
 {
-    private readonly ServerWorld              _world;
+    private readonly ServerWorld               _world;
     private readonly ILogger<CreatureAiSystem> _logger;
-    private readonly PathCache                _pathCache = new();
-    private CombatSystem?                 _combatSystem;
-
-    /// <summary>Exposed so SpawnManager can invalidate on creature death.</summary>
-    public PathCache PathCache => _pathCache;
-
-    /// <summary>Wire in after DI to delegate attack damage to CombatSystem.</summary>
-    public void SetCombatSystem(CombatSystem cs) => _combatSystem = cs;
-    private MapData?                          _mapData;
-    private readonly Random                   _rng = new();
+    private readonly PathCache                 _pathCache = new();
+    private CombatSystem?                      _combatSystem;
+    private MapData?                           _mapData;
+    private readonly Random                    _rng = new();
 
     private const float AlertDelay    = 0.5f;
     private const int   MeleeRange    = 1;
@@ -54,6 +47,12 @@ public sealed class CreatureAiSystem : ISystem
 
     private static readonly QueryDescription PlayerQuery = new QueryDescription()
         .WithAll<PlayerTag, PositionComponent>();
+
+    /// <summary>Exposed so SpawnManager can invalidate on creature death.</summary>
+    public PathCache PathCache => _pathCache;
+
+    /// <summary>Wire in after DI to delegate attack damage to CombatSystem.</summary>
+    public void SetCombatSystem(CombatSystem cs) => _combatSystem = cs;
 
     public CreatureAiSystem(ServerWorld world, ILogger<CreatureAiSystem> logger)
     {
@@ -196,7 +195,9 @@ public sealed class CreatureAiSystem : ISystem
             // ── Passive aggro scan (IDLE only) ───────────────────────────
             if (ai.State == CreatureState.Idle && creature.IsAggressive)
             {
-                var nearest = FindNearestPlayer(pos.TileX, pos.TileY, pos.FloorZ, creature.LookRange);
+                // Task 2.6: include LoS check in aggro detection
+                var nearest = FindNearestPlayerWithLoS(
+                    pos.TileX, pos.TileY, pos.FloorZ, creature.LookRange);
                 if (nearest != Entity.Null)
                 {
                     ai.TargetEntity = nearest;
@@ -209,7 +210,8 @@ public sealed class CreatureAiSystem : ISystem
             if ((ai.State == CreatureState.Chase || ai.State == CreatureState.Attack)
                 && !hasTarget && creature.IsAggressive)
             {
-                var nearest = FindNearestPlayer(pos.TileX, pos.TileY, pos.FloorZ, creature.ChaseRange);
+                var nearest = FindNearestPlayerWithLoS(
+                    pos.TileX, pos.TileY, pos.FloorZ, creature.ChaseRange);
                 if (nearest != Entity.Null)
                     ai.TargetEntity = nearest;
                 else
@@ -221,7 +223,7 @@ public sealed class CreatureAiSystem : ISystem
         });
     }
 
-    // ── Movement helpers ──────────────────────────────────────────────────────
+    // ── Movement helpers ──────────────────────────────────────────────────
 
     private void UpdateIdle(
         ref Entity entity,
@@ -235,7 +237,7 @@ public sealed class CreatureAiSystem : ISystem
         if (ai.WanderCooldown > 0f) return;
 
         ai.WanderCooldown = WanderMin + (float)(_rng.NextDouble() * (WanderMax - WanderMin));
-        if (_rng.NextDouble() > 0.30) return;
+        if (_rng.NextDouble() > 0.3) return;
 
         Direction[] dirs = { Direction.North, Direction.South, Direction.East, Direction.West };
         var dir = dirs[_rng.Next(dirs.Length)];
@@ -258,7 +260,6 @@ public sealed class CreatureAiSystem : ISystem
     {
         if (pos.IsMoving || _mapData == null) return;
 
-        // Try cached path first
         if (_pathCache.TryConsume(entityId, goalX, goalY, out int dx, out int dy))
         {
             if (dx != 0 || dy != 0)
@@ -266,7 +267,6 @@ public sealed class CreatureAiSystem : ISystem
             return;
         }
 
-        // Compute new path and cache it
         var path = AStarPathfinder.FindPath(
             pos.TileX, pos.TileY, pos.FloorZ,
             goalX, goalY, _mapData);
@@ -307,44 +307,56 @@ public sealed class CreatureAiSystem : ISystem
         }
         else
         {
-            // Fallback if CombatSystem not yet wired (e.g. during tests)
-            if (!ai.TargetEntity.Has<StatsComponent>()) return;
-            int dmg = _rng.Next(creature.AttackMin, creature.AttackMax + 1);
-            ref var targetStats = ref ai.TargetEntity.Get<StatsComponent>();
-            targetStats.CurrentHP = Math.Max(0, targetStats.CurrentHP - dmg);
+            _logger.LogWarning("CombatSystem not wired – creature attack skipped.");
         }
     }
 
-    // ── Spatial helpers ───────────────────────────────────────────────────────
+    // ── Scan helpers ──────────────────────────────────────────────────────
 
-    private Entity FindNearestPlayer(int fromX, int fromY, byte floor, int maxRange)
+    /// <summary>
+    /// Finds the nearest player within <paramref name="range"/> tiles
+    /// that has an unobstructed line of sight (Task 2.6).
+    /// Falls back to ignoring LoS when no map data is available.
+    /// </summary>
+    private Entity FindNearestPlayerWithLoS(int cx, int cy, byte floor, int range)
     {
-        Entity nearest  = Entity.Null;
-        int    bestDist = maxRange + 1;
+        Entity nearest = Entity.Null;
+        int    bestDist = int.MaxValue;
 
         _world.World.Query(in PlayerQuery,
-            (Entity e, ref PositionComponent ppos) =>
-        {
-            if (ppos.FloorZ != floor) return;
-            int d = ChebyshevDist(fromX, fromY, ppos.TileX, ppos.TileY);
-            if (d > maxRange || d >= bestDist) return;
-            // LoS check: creature must have unobstructed sight to the player
-            if (_mapData != null &&
-                !LineOfSight.HasLoS(fromX, fromY, ppos.TileX, ppos.TileY, floor, _mapData))
-                return;
-            bestDist = d;
-            nearest  = e;
-        });
+            (Entity pe, ref PositionComponent ppos) =>
+            {
+                if (ppos.FloorZ != floor) return;
+                int d = ChebyshevDist(cx, cy, ppos.TileX, ppos.TileY);
+                if (d > range || d >= bestDist) return;
+
+                // Task 2.6 LoS check
+                if (_mapData != null)
+                {
+                    bool los = LosChecker.HasLineOfSight(
+                        _mapData, cx, cy, ppos.TileX, ppos.TileY, floor);
+                    if (!los) return;
+                }
+
+                nearest  = pe;
+                bestDist = d;
+            });
 
         return nearest;
     }
+
+    // ── Legacy fallback (kept for Chase re-acquire path) ─────────────────
+    private Entity FindNearestPlayer(int cx, int cy, byte floor, int range)
+        => FindNearestPlayerWithLoS(cx, cy, floor, range);
 
     private static int ChebyshevDist(int x1, int y1, int x2, int y2)
         => Math.Max(Math.Abs(x1 - x2), Math.Abs(y1 - y2));
 
     private static float AttackCooldownFor(float speed)
     {
-        float s = Math.Clamp(speed, 100f, 400f);
-        return AttackBase * (1f - (s - 100f) / 300f * 0.7f);
+        // Tibia: attack speed = base 2s scaled by creature speed
+        // speed 200 = standard, lower = slower
+        float factor = speed > 0 ? 200f / speed : 1f;
+        return Math.Clamp(AttackBase * factor, 1.0f, 4.0f);
     }
 }
