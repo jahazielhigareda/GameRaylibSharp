@@ -1,3 +1,4 @@
+using Server.Creatures;
 using Arch.Core;
 using Arch.Core.Extensions;
 using Microsoft.Extensions.Logging;
@@ -19,12 +20,14 @@ public class GameLoop
     private readonly ILogger<GameLoop> _logger;
     private readonly ServerWorld       _world;
     private readonly MovementSystem    _movementSystem;
+    private readonly CreatureAiSystem   _creatureAiSystem;
     private readonly StatsSystem       _statsSystem;
     private readonly NetworkManager    _networkManager;
     private readonly EventBus          _eventBus;
     private readonly SpatialHashGrid   _spatialGrid;
     private readonly MapLoader         _mapLoader;
 
+    private readonly SpawnManager    _spawnManager;
     private MapData? _mapData;
     private int   _tick;
     private float _statsTimer;
@@ -38,7 +41,9 @@ public class GameLoop
         NetworkManager networkManager,
         EventBus eventBus,
         SpatialHashGrid spatialGrid,
-        MapLoader mapLoader)
+        MapLoader mapLoader,
+        SpawnManager spawnManager,
+        CreatureAiSystem creatureAiSystem)
     {
         _logger         = logger;
         _world          = world;
@@ -48,6 +53,8 @@ public class GameLoop
         _eventBus       = eventBus;
         _spatialGrid    = spatialGrid;
         _mapLoader      = mapLoader;
+        _spawnManager       = spawnManager;
+        _creatureAiSystem   = creatureAiSystem;
         _spatialGrid.SetEventBus(eventBus);
     }
 
@@ -57,8 +64,14 @@ public class GameLoop
         string mapPath = Path.Combine(AppContext.BaseDirectory, "world.map");
         _mapData = _mapLoader.Load(mapPath);
         _movementSystem.SetMapData(_mapData);
+        _creatureAiSystem.SetMapData(_mapData);
         _networkManager.SetMapData(_mapData);
         _movementSystem.NetworkManager = _networkManager;
+
+        // Spawn creatures
+        _spawnManager.SetAiSystem(_creatureAiSystem);
+        _spawnManager.RegisterDefaultSpawns();
+        _spawnManager.SpawnAll();
 
         const float targetDelta = 1f / Constants.TickRate;
         var sw = Stopwatch.StartNew();
@@ -76,7 +89,9 @@ public class GameLoop
 
             while (accumulator >= targetDelta)
             {
-                _movementSystem.Update((float)targetDelta);
+                _creatureAiSystem.Update((float)targetDelta);
+            _movementSystem.Update((float)targetDelta);
+            _spawnManager.Update((float)targetDelta);
                 _statsSystem.Update((float)targetDelta);
                 BroadcastState();
                 BroadcastStatsIfNeeded((float)targetDelta);

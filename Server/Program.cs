@@ -8,6 +8,7 @@ using Server.ECS;
 using Server.ECS.Systems;
 using Server.Network;
 using Server.Services;
+using Server.Creatures;
 
 var services = new ServiceCollection();
 
@@ -19,8 +20,11 @@ services.AddSingleton<SpatialHashGrid>();
 services.AddSingleton<MapLoader>();
 services.AddSingleton<PlayerService>();
 services.AddSingleton<MovementSystem>();
+services.AddSingleton<CreatureAiSystem>();
 services.AddSingleton<StatsSystem>();
 services.AddSingleton<NetworkManager>();
+services.AddSingleton<CreatureDatabase>();
+services.AddSingleton<SpawnManager>();
 services.AddSingleton<GameLoop>();
 
 var provider = services.BuildServiceProvider();

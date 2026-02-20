@@ -86,6 +86,57 @@ public sealed class ServerWorld : IDisposable
                 MaxHP        = maxHp,
                 CurrentHP    = maxHp,
                 IsAggressive = aggressive
+            },
+            new CreatureAiComponent
+            {
+                State    = CreatureState.Idle,
+                SpawnX   = tileX,
+                SpawnY   = tileY,
+                SpawnFloor = floorZ,
+                PathTargetX = -1,
+                PathTargetY = -1,
+            });
+    }
+
+
+    /// <summary>Spawn a creature from a <see cref="Shared.Creatures.CreatureTemplate"/>.</summary>
+    public Entity SpawnCreature(Shared.Creatures.CreatureTemplate template,
+                                int tileX, int tileY, byte floorZ = 7)
+    {
+        var pos = new PositionComponent();
+        pos.SetTilePosition(tileX, tileY);
+        pos.FloorZ = floorZ;
+
+        return World.Create(
+            new CreatureTag(),
+            pos,
+            new SpeedComponent(),
+            new MovementQueueComponent(),
+            new CreatureComponent
+            {
+                CreatureId   = template.Id,
+                MaxHP        = template.MaxHP,
+                CurrentHP    = template.MaxHP,
+                MaxMP        = template.MaxMP,
+                CurrentMP    = template.MaxMP,
+                Experience   = template.Experience,
+                AttackMin    = template.AttackMin,
+                AttackMax    = template.AttackMax,
+                Armor        = template.Armor,
+                Defense      = template.Defense,
+                LookRange    = template.LookRange,
+                ChaseRange   = template.ChaseRange,
+                Behavior     = template.Behavior,
+                IsAggressive = template.Behavior != Shared.Creatures.CreatureBehavior.Passive,
+            },
+            new CreatureAiComponent
+            {
+                State      = CreatureState.Idle,
+                SpawnX     = tileX,
+                SpawnY     = tileY,
+                SpawnFloor = floorZ,
+                PathTargetX = -1,
+                PathTargetY = -1,
             });
     }
 
