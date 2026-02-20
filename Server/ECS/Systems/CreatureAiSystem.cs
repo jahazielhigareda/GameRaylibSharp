@@ -6,6 +6,7 @@ using Server.ECS;
 using Server.ECS.Components;
 using Server.Maps;
 using Shared;
+using Server.Combat;
 
 namespace Server.ECS.Systems;
 
@@ -326,7 +327,13 @@ public sealed class CreatureAiSystem : ISystem
         {
             if (ppos.FloorZ != floor) return;
             int d = ChebyshevDist(fromX, fromY, ppos.TileX, ppos.TileY);
-            if (d <= maxRange && d < bestDist) { bestDist = d; nearest = e; }
+            if (d > maxRange || d >= bestDist) return;
+            // LoS check: creature must have unobstructed sight to the player
+            if (_mapData != null &&
+                !LineOfSight.HasLoS(fromX, fromY, ppos.TileX, ppos.TileY, floor, _mapData))
+                return;
+            bestDist = d;
+            nearest  = e;
         });
 
         return nearest;

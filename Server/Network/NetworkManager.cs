@@ -10,6 +10,7 @@ using Server.Services;
 using Shared;
 using Shared.Network;
 using Shared.Packets;
+using Server.Combat;
 
 namespace Server.Network;
 
@@ -212,6 +213,21 @@ public class NetworkManager : IDisposable
         {
             _logger.LogDebug("Player {NetId} targeted unknown creature {CId}.", netId, req.CreatureNetId);
             return;
+        }
+
+        // Line of Sight validation
+        if (_currentMap != null)
+        {
+            ref var pPos = ref playerEntity.Get<Server.ECS.Components.PositionComponent>();
+            ref var cPos = ref creatureEntity.Get<Server.ECS.Components.PositionComponent>();
+            if (!LineOfSight.HasLoS(
+                    pPos.TileX, pPos.TileY,
+                    cPos.TileX, cPos.TileY,
+                    pPos.FloorZ, _currentMap))
+            {
+                _logger.LogDebug("Player {NetId}: no LoS to creature {CId}.", netId, req.CreatureNetId);
+                return;
+            }
         }
 
         combat.TargetEntity = creatureEntity;

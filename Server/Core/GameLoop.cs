@@ -67,6 +67,7 @@ public class GameLoop
         _mapData = _mapLoader.Load(mapPath);
         _movementSystem.SetMapData(_mapData);
         _creatureAiSystem.SetMapData(_mapData);
+        _combatSystem.SetMapData(_mapData);
         _networkManager.SetMapData(_mapData);
         _movementSystem.NetworkManager = _networkManager;
 
