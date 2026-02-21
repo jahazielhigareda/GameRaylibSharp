@@ -37,10 +37,16 @@ public sealed class CreatureDatabase
         Register(new CreatureTemplate
         {
             Id = 1, Name = "Rat",
-            MaxHP = 20, MaxMP = 0, Experience = 5, Speed = 160,
+            // Tibia-accurate stats: HP=20, XP=5, Speed=100, ATK=1-4
+            MaxHP = 20, MaxMP = 0, Experience = 5, Speed = 100,
             Armor = 0, Defense = 0, AttackMin = 1, AttackMax = 4,
-            LookRange = 3, ChaseRange = 5, Behavior = CreatureBehavior.Melee,
-            LootTable = new[] { new LootEntry { ItemId = 3031, Chance = 1.00f, MinCount = 1, MaxCount = 1 } },
+            LookRange = 5, ChaseRange = 7,
+            Behavior = CreatureBehavior.Melee,
+            LootTable = new[]
+            {
+                new LootEntry { ItemId = 3031, Chance = 1.00f, MinCount = 1, MaxCount = 1 }, // Gold coin
+                new LootEntry { ItemId = 5908, Chance = 0.50f, MinCount = 1, MaxCount = 1 }, // Cheese
+            },
         });
 
         Register(new CreatureTemplate

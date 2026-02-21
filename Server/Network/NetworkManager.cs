@@ -215,23 +215,9 @@ public class NetworkManager : IDisposable
             return;
         }
 
-        // Line of Sight validation
-        if (_currentMap != null)
-        {
-            ref var pPos = ref playerEntity.Get<Server.ECS.Components.PositionComponent>();
-            ref var cPos = ref creatureEntity.Get<Server.ECS.Components.PositionComponent>();
-            if (!LineOfSight.HasLoS(
-                    pPos.TileX, pPos.TileY,
-                    cPos.TileX, cPos.TileY,
-                    pPos.FloorZ, _currentMap))
-            {
-                _logger.LogDebug("Player {NetId}: no LoS to creature {CId}.", netId, req.CreatureNetId);
-                return;
-            }
-        }
 
         combat.TargetEntity = creatureEntity;
-        _logger.LogDebug("Player {NetId} targeted creature {CId}.", netId, req.CreatureNetId);
+        _logger.LogInformation("Player {NetId} set target to creature netId={CId}.", netId, req.CreatureNetId);
     }
 
     // ── Broadcast helpers ─────────────────────────────────────────────────

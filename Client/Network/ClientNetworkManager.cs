@@ -156,6 +156,14 @@ public class ClientNetworkManager : IDisposable
     {
         foreach (var snap in players)
         {
+            // Route creatures to UpsertCreature (not SpawnPlayer)
+            if (snap.EntityType == Shared.Packets.SnapshotEntityType.Creature)
+            {
+                _world.UpsertCreature(snap.Id, snap.TileX, snap.TileY,
+                                      snap.X, snap.Y, snap.HpPct,
+                                      snap.Name ?? string.Empty);
+                continue;
+            }
             var entity = _world.FindPlayer(snap.Id);
             if (entity == Arch.Core.Entity.Null)
             {

@@ -119,6 +119,7 @@ public sealed class ServerWorld : IDisposable
             new CreatureComponent
             {
                 CreatureId   = template.Id,
+                Name         = template.Name,
                 MaxHP        = template.MaxHP,
                 CurrentHP    = template.MaxHP,
                 MaxMP        = template.MaxMP,

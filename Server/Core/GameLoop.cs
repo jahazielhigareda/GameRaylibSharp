@@ -177,6 +177,7 @@ public class GameLoop
                         EntityType = Shared.Packets.SnapshotEntityType.Creature,
                         HpPct      = hpPct,
                         CreatureId = ccomp.CreatureId,
+                        Name       = ccomp.Name ?? string.Empty,
                     });
                 });
 

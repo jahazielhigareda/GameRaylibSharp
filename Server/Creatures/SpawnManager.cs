@@ -99,7 +99,9 @@ public sealed class SpawnManager
                 var pt = _points[key.SpawnIndex];
                 _respawnIn[key] = pt.RespawnTime;
                 _aiSystem?.PathCache.Invalidate(entity.Id);
-                _logger.LogDebug("Spawn slot {Key} will respawn in {T}s.", key, pt.RespawnTime);
+                _logger.LogInformation(
+                    "Creature '{Name}' died. Slot {Key} will respawn in {T}s.",
+                    pt.CreatureName, key, pt.RespawnTime);
                 return;
             }
         }

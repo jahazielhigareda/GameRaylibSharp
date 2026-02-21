@@ -8,3 +8,9 @@ public struct CreatureHpComponent
 {
     public byte HpPct;
 }
+
+/// <summary>Display name shown above the creature.</summary>
+public struct CreatureNameComponent
+{
+    public string Name;
+}

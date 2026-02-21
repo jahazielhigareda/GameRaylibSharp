@@ -11,11 +11,16 @@ using Shared.Packets;
 namespace Client.ECS.Systems;
 
 /// <summary>
-/// Tibia-style input system – 8-directional movement + click-to-target.
+/// Tibia-style input: 8-directional movement + click-to-target.
 ///
-/// Left-click  on a creature  → send TargetRequestPacket (target it)
-/// Right-click anywhere       → clear current target
-/// WASD/Arrows                → movement (MoveRequestPacket)
+/// Left-click  on a creature tile → send TargetRequestPacket
+/// Right-click anywhere           → clear current target
+/// WASD / Arrow keys              → movement
+///
+/// Click detection uses the full TILE (TileSize x TileSize) rather than
+/// the small sprite rectangle. TileX/TileY are always correct even before
+/// visual interpolation catches up, because they are set directly from the
+/// server snapshot.
 /// </summary>
 public class InputSystem : ISystem
 {
@@ -24,14 +29,12 @@ public class InputSystem : ISystem
     private readonly CameraService        _camera;
     private readonly GameStateService     _state;
 
-    private int   _tick;
     private Direction _lastSentDirection = Direction.None;
-    private float _repeatTimer;
+    private float     _repeatTimer;
     private const float RepeatInterval = 0.08f;
 
-    // Arch query to find creature entities
     private static readonly QueryDescription CreatureQuery = new QueryDescription()
-        .WithAll<NetworkIdComponent, PositionComponent, RenderComponent, CreatureClientTag>();
+        .WithAll<NetworkIdComponent, PositionComponent, CreatureClientTag>();
 
     public InputSystem(ClientNetworkManager network, ClientWorld world,
                        CameraService camera, GameStateService state)
@@ -52,7 +55,6 @@ public class InputSystem : ISystem
 
     private void HandleClickTargeting()
     {
-        // Right-click clears target
         if (Raylib.IsMouseButtonPressed(MouseButton.Right))
         {
             _state.TargetedEntityId = 0;
@@ -63,23 +65,34 @@ public class InputSystem : ISystem
         if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
 
         var (offsetX, offsetY) = _camera.GetOffset();
-        var mousePos = Raylib.GetMousePosition();
-        int ts = Constants.TileSize;
+        var mousePos           = Raylib.GetMousePosition();
+        int ts                 = Constants.TileSize;
 
-        int clickedNetId = 0;
+        int   clickedNetId = 0;
+        float bestDist     = float.MaxValue;
 
         _world.World.Query(in CreatureQuery,
-            (Entity e, ref NetworkIdComponent nid, ref PositionComponent pos, ref RenderComponent render) =>
+            (Entity e, ref NetworkIdComponent nid, ref PositionComponent pos) =>
             {
-                // Already found one this frame
-                if (clickedNetId != 0) return;
+                // Use tile screen position — always valid regardless of interpolation
+                float tileScreenX = pos.TileX * ts + offsetX;
+                float tileScreenY = pos.TileY * ts + offsetY;
 
-                float drawX = pos.X + offsetX + (ts - render.Size) / 2f;
-                float drawY = pos.Y + offsetY + (ts - render.Size) / 2f;
+                var tileBounds = new Rectangle(tileScreenX, tileScreenY, ts, ts);
+                if (!Raylib.CheckCollisionPointRec(mousePos, tileBounds)) return;
 
-                var bounds = new Rectangle(drawX, drawY, render.Size, render.Size);
-                if (Raylib.CheckCollisionPointRec(mousePos, bounds))
+                // Prefer closest to mouse centre when multiple overlap
+                float cx   = tileScreenX + ts * 0.5f;
+                float cy   = tileScreenY + ts * 0.5f;
+                float dist = MathF.Sqrt(
+                    (mousePos.X - cx) * (mousePos.X - cx) +
+                    (mousePos.Y - cy) * (mousePos.Y - cy));
+
+                if (dist < bestDist)
+                {
+                    bestDist     = dist;
                     clickedNetId = nid.Id;
+                }
             });
 
         if (clickedNetId != 0)
@@ -102,45 +115,30 @@ public class InputSystem : ISystem
                 SendMoveRequest(dir);
                 _repeatTimer = RepeatInterval;
             }
-            else _repeatTimer -= deltaTime;
+            else
+            {
+                _repeatTimer -= deltaTime;
+            }
             _lastSentDirection = dir;
         }
         else
         {
-            if (_lastSentDirection != Direction.None)
-            {
-                SendMoveRequest(Direction.None);
-                _lastSentDirection = Direction.None;
-            }
-            _repeatTimer = 0f;
+            _lastSentDirection = Direction.None;
+            _repeatTimer       = 0f;
         }
     }
 
     private static Direction GetCurrentDirection()
     {
-        bool up    = Raylib.IsKeyDown(KeyboardKey.W) || Raylib.IsKeyDown(KeyboardKey.Up);
-        bool down  = Raylib.IsKeyDown(KeyboardKey.S) || Raylib.IsKeyDown(KeyboardKey.Down);
-        bool left  = Raylib.IsKeyDown(KeyboardKey.A) || Raylib.IsKeyDown(KeyboardKey.Left);
-        bool right = Raylib.IsKeyDown(KeyboardKey.D) || Raylib.IsKeyDown(KeyboardKey.Right);
-
-        if (up   && down)  { up   = down  = false; }
-        if (left && right) { left = right = false; }
-
-        if (up   && right) return Direction.NorthEast;
-        if (up   && left)  return Direction.NorthWest;
-        if (down && right) return Direction.SouthEast;
-        if (down && left)  return Direction.SouthWest;
-        if (up)            return Direction.North;
-        if (down)          return Direction.South;
-        if (left)          return Direction.West;
-        if (right)         return Direction.East;
+        if (Raylib.IsKeyDown(KeyboardKey.Up)    || Raylib.IsKeyDown(KeyboardKey.W)) return Direction.North;
+        if (Raylib.IsKeyDown(KeyboardKey.Down)  || Raylib.IsKeyDown(KeyboardKey.S)) return Direction.South;
+        if (Raylib.IsKeyDown(KeyboardKey.Left)  || Raylib.IsKeyDown(KeyboardKey.A)) return Direction.West;
+        if (Raylib.IsKeyDown(KeyboardKey.Right) || Raylib.IsKeyDown(KeyboardKey.D)) return Direction.East;
         return Direction.None;
     }
 
     private void SendMoveRequest(Direction dir)
-        => _network.SendMoveRequest(new MoveRequestPacket
-        {
-            Direction = (byte)dir,
-            Tick      = _tick++
-        });
+    {
+        _network.SendMoveRequest(new MoveRequestPacket { Direction = (byte)dir });
+    }
 }

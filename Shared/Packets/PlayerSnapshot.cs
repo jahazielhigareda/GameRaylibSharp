@@ -23,4 +23,6 @@ public class PlayerSnapshot
     [Key(6)] public byte   HpPct      { get; set; } = 100;
     /// <summary>Creature template ID (only meaningful when EntityType == Creature).</summary>
     [Key(7)] public ushort CreatureId { get; set; }
+    /// <summary>Display name shown above the entity (creature name or player name).</summary>
+    [Key(8)] public string Name       { get; set; } = string.Empty;
 }

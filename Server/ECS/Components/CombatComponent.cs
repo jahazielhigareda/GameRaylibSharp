@@ -36,7 +36,7 @@ public struct CombatComponent
         AttackCooldown  = 0f;
         WeaponAttack    = 10;   // Bare fist default
         WeaponSkillType = WeaponSkillType.Fist;
-        ShieldDefense   = 5;    // No shield default
+        ShieldDefense   = 0;    // 0 = no shield equipped; Shielding skill won't train without one
         TotalArmor      = 0;
     }
 }

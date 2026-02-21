@@ -69,7 +69,7 @@ public sealed class ClientWorld : IDisposable
 
 
     /// <summary>Creates or updates a remote creature entity from a server snapshot.</summary>
-    public void UpsertCreature(int netId, int tileX, int tileY, float x, float y, byte hpPct)
+    public void UpsertCreature(int netId, int tileX, int tileY, float x, float y, byte hpPct, string name = "")
     {
         // Try to find existing
         Entity found = Entity.Null;
@@ -86,7 +86,8 @@ public sealed class ClientWorld : IDisposable
                 new RenderComponent { Color = Raylib_cs.Color.Orange, Size = Constants.CreatureSize },
                 new CreatureRenderOrder(),
                 new CreatureClientTag(),
-                new CreatureHpComponent());
+                new CreatureHpComponent(),
+                new CreatureNameComponent());
         }
 
         ref var pos = ref found.Get<PositionComponent>();
@@ -95,6 +96,12 @@ public sealed class ClientWorld : IDisposable
 
         if (found.Has<CreatureHpComponent>())
             found.Get<CreatureHpComponent>().HpPct = hpPct;
+
+        if (found.Has<CreatureNameComponent>() && !string.IsNullOrEmpty(name))
+        {
+            ref var nm = ref found.Get<CreatureNameComponent>();
+            nm.Name = name;
+        }
     }
 
     public void RemoveCreature(int netId)

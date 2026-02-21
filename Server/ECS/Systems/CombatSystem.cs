@@ -92,8 +92,7 @@ public sealed class CombatSystem : ISystem
                     var stepDir = Shared.DirectionHelper.FromOffset(
                         dx == 0 ? 0 : (dx > 0 ? 1 : -1),
                         dy == 0 ? 0 : (dy > 0 ? 1 : -1));
-                    if (mq.QueuedDirection == (byte)Shared.Direction.None)
-                        mq.QueuedDirection = (byte)stepDir;
+                    mq.QueuedDirection = (byte)stepDir; // always auto-walk toward target
                 }
                 return;
             }
@@ -200,8 +199,12 @@ public sealed class CombatSystem : ISystem
 
         bool died = stats.TakeDamage(damage);
 
-        // Shielding skill training on being hit
-        skills.AddTries(SkillType.Shielding, 1, stats.Vocation);
+        // Shielding skill training on being hit – only if player has a shield equipped.
+        // In Tibia, shielding advances only when you block with a shield.
+        bool hasShield = playerEntity.Has<CombatComponent>()
+                      && playerEntity.Get<CombatComponent>().ShieldDefense > 0;
+        if (hasShield)
+            skills.AddTries(SkillType.Shielding, 1, stats.Vocation);
 
         _logger.LogDebug("Creature {Name} deals {Dmg} to player (HP {HP}/{MaxHP})",
             creature.Name, damage, stats.CurrentHP, stats.MaxHP);
