@@ -104,6 +104,17 @@ public sealed class ClientWorld : IDisposable
         }
     }
 
+    /// <summary>Find a creature entity by its network ID.</summary>
+    public Entity FindCreature(int netId)
+    {
+        Entity found = Entity.Null;
+        World.Query(in CreatureQuery, (Entity e, ref NetworkIdComponent nid) =>
+        {
+            if (nid.Id == netId) found = e;
+        });
+        return found;
+    }
+
     public void RemoveCreature(int netId)
     {
         Entity found = Entity.Null;
@@ -142,8 +153,12 @@ public sealed class ClientWorld : IDisposable
 
     public int CountPlayers()
     {
+        // Exclude creatures — they also match PlayerQuery (same components)
         int count = 0;
-        World.Query(in PlayerQuery, (Entity _) => count++);
+        World.Query(in PlayerQuery, (Entity e) =>
+        {
+            if (!e.Has<CreatureClientTag>()) count++;
+        });
         return count;
     }
 

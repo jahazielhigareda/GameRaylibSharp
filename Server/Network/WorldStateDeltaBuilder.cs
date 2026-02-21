@@ -4,23 +4,12 @@ namespace Server.Network;
 
 /// <summary>
 /// Computes full or delta world-state updates per client.
-///
-/// A full WorldStatePacket is sent when:
-///   - The client has no stored baseline (new connection).
-///   - More than 70% of entities changed (cheaper to resync than delta).
-///
-/// Otherwise a WorldDeltaPacket is produced containing only
-/// Added / Updated / Removed entries, and the baseline is advanced.
+/// A full snapshot is sent on first connection or when >70% of entities changed.
 /// </summary>
 public static class WorldStateDeltaBuilder
 {
     private const float DeltaThreshold = 0.7f;
 
-    /// <summary>
-    /// Returns either a <see cref="WorldStatePacket"/> (full) or a
-    /// <see cref="WorldDeltaPacket"/> (delta), updating
-    /// <paramref name="session"/> with the new baseline.
-    /// </summary>
     public static object BuildUpdate(WorldStatePacket current, PeerSessionState session)
     {
         if (session.LastSentSnapshot == null)
@@ -76,20 +65,20 @@ public static class WorldStateDeltaBuilder
 
     private static PlayerDeltaSnapshot? ComputeDelta(PlayerSnapshot old, PlayerSnapshot curr)
     {
-        bool tileXChanged = old.TileX != curr.TileX;
-        bool tileYChanged = old.TileY != curr.TileY;
-        bool xChanged     = MathF.Abs(old.X - curr.X) > 0.01f;
-        bool yChanged     = MathF.Abs(old.Y - curr.Y) > 0.01f;
+        bool posChanged = old.TileX != curr.TileX || old.TileY != curr.TileY
+                       || old.X     != curr.X     || old.Y     != curr.Y;
+        bool hpChanged  = old.HpPct != curr.HpPct;
 
-        if (!tileXChanged && !tileYChanged && !xChanged && !yChanged) return null;
+        if (!posChanged && !hpChanged) return null;
 
         return new PlayerDeltaSnapshot
         {
             Id    = curr.Id,
-            TileX = tileXChanged ? curr.TileX : null,
-            TileY = tileYChanged ? curr.TileY : null,
-            X     = xChanged     ? curr.X     : null,
-            Y     = yChanged     ? curr.Y     : null,
+            TileX = posChanged ? curr.TileX : null,
+            TileY = posChanged ? curr.TileY : null,
+            X     = posChanged ? curr.X     : null,
+            Y     = posChanged ? curr.Y     : null,
+            HpPct = hpChanged  ? curr.HpPct : null,
         };
     }
 }

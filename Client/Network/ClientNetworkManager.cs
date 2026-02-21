@@ -136,13 +136,25 @@ public class ClientNetworkManager : IDisposable
 
         foreach (var d in delta.Updated)
         {
+            // Try player first, then creature
             var entity = _world.FindPlayer(d.Id);
+            if (entity == Arch.Core.Entity.Null)
+                entity = _world.FindCreature(d.Id);
             if (entity == Arch.Core.Entity.Null) continue;
-            ref var pos = ref entity.Get<PositionComponent>();
-            if (d.TileX.HasValue) pos.TileX   = d.TileX.Value;
-            if (d.TileY.HasValue) pos.TileY   = d.TileY.Value;
-            if (d.X.HasValue)     pos.TargetX = d.X.Value;
-            if (d.Y.HasValue)     pos.TargetY = d.Y.Value;
+
+            // Update HP (applies to creatures when they take damage)
+            if (d.HpPct.HasValue && entity.Has<CreatureHpComponent>())
+                entity.Get<CreatureHpComponent>().HpPct = d.HpPct.Value;
+
+            // Update position
+            if (entity.Has<PositionComponent>())
+            {
+                ref var pos = ref entity.Get<PositionComponent>();
+                if (d.TileX.HasValue) pos.TileX   = d.TileX.Value;
+                if (d.TileY.HasValue) pos.TileY   = d.TileY.Value;
+                if (d.X.HasValue)     pos.TargetX = d.X.Value;
+                if (d.Y.HasValue)     pos.TargetY = d.Y.Value;
+            }
         }
 
         foreach (var id in delta.Removed)

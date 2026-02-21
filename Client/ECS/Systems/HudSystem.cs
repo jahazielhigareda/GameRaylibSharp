@@ -30,7 +30,7 @@ public class HudSystem : ISystem
         int sw      = Raylib.GetScreenWidth();
         int sh      = Raylib.GetScreenHeight();
 
-        Raylib.DrawText($"Players: {players}",         10, 10, 20, Color.White);
+        Raylib.DrawText($"Online: {players}",         10, 10, 20, Color.White);
         Raylib.DrawText($"Server tick: {_state.Tick}", 10, 35, 20, Color.White);
         Raylib.DrawText($"FPS: {fps}",                 10, 60, 20, Color.White);
 

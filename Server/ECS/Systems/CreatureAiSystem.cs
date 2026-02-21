@@ -2,6 +2,7 @@ using Arch.Core;
 using Arch.Core.Extensions;
 using Microsoft.Extensions.Logging;
 using Server.AI;
+using Server.Combat;
 using Server.ECS;
 using Server.ECS.Components;
 using Server.Maps;
@@ -10,20 +11,28 @@ using Shared;
 namespace Server.ECS.Systems;
 
 /// <summary>
-/// Per-tick FSM update for all creature entities.
+/// Per-tick creature FSM — Tibia-accurate chasing.
 ///
-/// Canary equivalent: game/game.cpp Game::checkCreatureMove() / creature AI
+/// Tibia creature movement rules (TFS reference):
+///   1. A* is computed every tick toward an ADJACENT goal tile.
+///      The path ignores creature/player occupancy — only walls matter.
+///   2. QueuedDirection is set every tick. MovementSystem consumes it
+///      only when the previous step finishes (pos.IsMoving == false).
+///      This means the creature "pre-queues" the next step while still moving.
+///   3. If A* returns (0,0) and creature is not yet adjacent, it attempts
+///      a random cardinal step to escape deadlock (TFS equivalent of
+///      "pushCreatures" / randomStep logic).
+///   4. Creatures DO block each other at the MovementSystem level.
+///      A* ignores this — the creature retries automatically next tick.
 ///
-/// State machine:
-///   IDLE    -> ALERT   : player enters lookRange (+ LoS check)
-///   ALERT   -> CHASE   : 0.5 s delay elapses
-///   CHASE   -> ATTACK  : player within melee range (1 tile)
-///   CHASE   -> RETURN  : player out of chaseRange or target gone
-///   ATTACK  -> CHASE   : player moves out of melee range
-///   ATTACK  -> FLEE    : HP below 15% and creature has Fleeing behavior
-///   FLEE    -> RETURN  : target out of chaseRange
-///   RETURN  -> IDLE    : reached spawn anchor
-///   ANY     -> DEAD    : HP &lt;= 0
+/// FSM states:
+///   IDLE   → ALERT  : player within LookRange + LoS
+///   ALERT  → CHASE  : 0.5 s delay
+///   CHASE  → ATTACK : Chebyshev dist ≤ 1 (adjacent)
+///   ATTACK → CHASE  : player moves away
+///   CHASE  → RETURN : player out of ChaseRange or target lost
+///   RETURN → IDLE   : reached spawn tile (within 1 tile)
+///   ANY    → DEAD   : HP ≤ 0
 /// </summary>
 public sealed class CreatureAiSystem : ISystem
 {
@@ -37,9 +46,8 @@ public sealed class CreatureAiSystem : ISystem
     private const float AlertDelay    = 0.5f;
     private const int   MeleeRange    = 1;
     private const float FleeThreshold = 0.15f;
-    private const float WanderMin     = 1.5f;
-    private const float WanderMax     = 3.5f;
-    private const float AttackBase    = 2.0f;
+    private const float WanderMin     = 2.0f;
+    private const float WanderMax     = 4.5f;
 
     private static readonly QueryDescription AiQuery = new QueryDescription()
         .WithAll<CreatureTag, CreatureComponent, CreatureAiComponent,
@@ -48,10 +56,8 @@ public sealed class CreatureAiSystem : ISystem
     private static readonly QueryDescription PlayerQuery = new QueryDescription()
         .WithAll<PlayerTag, PositionComponent>();
 
-    /// <summary>Exposed so SpawnManager can invalidate on creature death.</summary>
     public PathCache PathCache => _pathCache;
 
-    /// <summary>Wire in after DI to delegate attack damage to CombatSystem.</summary>
     public void SetCombatSystem(CombatSystem cs) => _combatSystem = cs;
 
     public CreatureAiSystem(ServerWorld world, ILogger<CreatureAiSystem> logger)
@@ -65,6 +71,8 @@ public sealed class CreatureAiSystem : ISystem
         _mapData = map;
         _pathCache.Clear();
     }
+
+    // ── Main update ───────────────────────────────────────────────────────
 
     public void Update(float deltaTime)
     {
@@ -80,7 +88,6 @@ public sealed class CreatureAiSystem : ISystem
         {
             if (ai.State == CreatureState.Dead) return;
 
-            // ── Dead check ──────────────────────────────────────────────
             if (creature.CurrentHP <= 0)
             {
                 ai.State = CreatureState.Dead;
@@ -88,7 +95,7 @@ public sealed class CreatureAiSystem : ISystem
                 return;
             }
 
-            // ── Resolve target ──────────────────────────────────────────
+            // ── Resolve target position ───────────────────────────────────
             bool hasTarget = ai.TargetEntity != Entity.Null
                           && ai.TargetEntity.IsAlive()
                           && ai.TargetEntity.Has<PositionComponent>();
@@ -99,26 +106,22 @@ public sealed class CreatureAiSystem : ISystem
                 ref var tpos = ref ai.TargetEntity.Get<PositionComponent>();
                 if (tpos.FloorZ != pos.FloorZ)
                     hasTarget = false;
-                else
-                {
-                    targetX = tpos.TileX;
-                    targetY = tpos.TileY;
-                }
+                else { targetX = tpos.TileX; targetY = tpos.TileY; }
             }
 
-            int dist = hasTarget
-                ? ChebyshevDist(pos.TileX, pos.TileY, targetX, targetY)
-                : int.MaxValue;
+            int dist = hasTarget ? Chebyshev(pos.TileX, pos.TileY, targetX, targetY) : int.MaxValue;
 
             if (ai.AttackCooldown > 0f) ai.AttackCooldown -= deltaTime;
 
-            // ── FSM ──────────────────────────────────────────────────────
+            // ── FSM ───────────────────────────────────────────────────────
             switch (ai.State)
             {
+                // ── IDLE ──────────────────────────────────────────────────
                 case CreatureState.Idle:
-                    UpdateIdle(ref entity, ref creature, ref ai, ref pos, ref queue, deltaTime);
+                    UpdateIdle(ref creature, ref ai, ref pos, ref queue, deltaTime);
                     break;
 
+                // ── ALERT (0.5 s aggro delay) ─────────────────────────────
                 case CreatureState.Alert:
                     ai.StateTimer += deltaTime;
                     if (ai.StateTimer >= AlertDelay)
@@ -128,6 +131,7 @@ public sealed class CreatureAiSystem : ISystem
                     }
                     break;
 
+                // ── CHASE ─────────────────────────────────────────────────
                 case CreatureState.Chase:
                     if (!hasTarget || dist > creature.ChaseRange)
                     {
@@ -142,13 +146,22 @@ public sealed class CreatureAiSystem : ISystem
                         _pathCache.Invalidate(entity.Id);
                         break;
                     }
-                    MoveToward(entity.Id, ref ai, ref pos, ref queue, targetX, targetY);
+                    // Compute and queue movement every tick
+                    ChaseTarget(entity.Id, ref ai, ref pos, ref queue, targetX, targetY);
                     break;
 
+                // ── ATTACK ────────────────────────────────────────────────
                 case CreatureState.Attack:
                     if (!hasTarget)
                     {
                         ai.State = CreatureState.Return;
+                        _pathCache.Invalidate(entity.Id);
+                        break;
+                    }
+                    if (dist > MeleeRange)
+                    {
+                        // Player moved — go back to chasing immediately
+                        ai.State = CreatureState.Chase;
                         break;
                     }
                     if (creature.Behavior == Shared.Creatures.CreatureBehavior.Fleeing
@@ -158,11 +171,6 @@ public sealed class CreatureAiSystem : ISystem
                         _pathCache.Invalidate(entity.Id);
                         break;
                     }
-                    if (dist > MeleeRange)
-                    {
-                        ai.State = CreatureState.Chase;
-                        break;
-                    }
                     if (ai.AttackCooldown <= 0f)
                     {
                         ExecuteAttack(ref creature, ref ai);
@@ -170,6 +178,7 @@ public sealed class CreatureAiSystem : ISystem
                     }
                     break;
 
+                // ── FLEE ──────────────────────────────────────────────────
                 case CreatureState.Flee:
                     if (!hasTarget || dist > creature.ChaseRange)
                     {
@@ -180,22 +189,22 @@ public sealed class CreatureAiSystem : ISystem
                     FleeFrom(ref ai, ref pos, ref queue, targetX, targetY);
                     break;
 
+                // ── RETURN ────────────────────────────────────────────────
                 case CreatureState.Return:
-                    int distToSpawn = ChebyshevDist(pos.TileX, pos.TileY, ai.SpawnX, ai.SpawnY);
+                    int distToSpawn = Chebyshev(pos.TileX, pos.TileY, ai.SpawnX, ai.SpawnY);
                     if (distToSpawn <= 1)
                     {
                         ai.State = CreatureState.Idle;
                         _pathCache.Invalidate(entity.Id);
                         break;
                     }
-                    MoveToward(entity.Id, ref ai, ref pos, ref queue, ai.SpawnX, ai.SpawnY);
+                    ReturnToSpawn(entity.Id, ref ai, ref pos, ref queue);
                     break;
             }
 
             // ── Passive aggro scan (IDLE only) ───────────────────────────
             if (ai.State == CreatureState.Idle && creature.IsAggressive)
             {
-                // Task 2.6: include LoS check in aggro detection
                 var nearest = FindNearestPlayerWithLoS(
                     pos.TileX, pos.TileY, pos.FloorZ, creature.LookRange);
                 if (nearest != Entity.Null)
@@ -206,7 +215,7 @@ public sealed class CreatureAiSystem : ISystem
                 }
             }
 
-            // ── Re-acquire target if lost in Chase/Attack ────────────────
+            // ── Re-acquire lost target ───────────────────────────────────
             if ((ai.State == CreatureState.Chase || ai.State == CreatureState.Attack)
                 && !hasTarget && creature.IsAggressive)
             {
@@ -225,11 +234,44 @@ public sealed class CreatureAiSystem : ISystem
 
     // ── Movement helpers ──────────────────────────────────────────────────
 
+    /// <summary>
+    /// Tibia-accurate chase: A* every tick, target = adjacent tile to player.
+    /// QueuedDirection set regardless of pos.IsMoving so MovementSystem can
+    /// consume it immediately when the current step finishes.
+    /// </summary>
+    private void ChaseTarget(
+        int entityId,
+        ref CreatureAiComponent    ai,
+        ref PositionComponent      pos,
+        ref MovementQueueComponent queue,
+        int targetX, int targetY)
+    {
+        if (_mapData == null) return;
+
+        // Compute next step every tick — no stale cache for chase
+        var (dx, dy) = AStarPathfinder.NextStep(
+            pos.TileX, pos.TileY, pos.FloorZ,
+            targetX, targetY, _mapData);
+
+        if (dx != 0 || dy != 0)
+        {
+            queue.QueuedDirection = (byte)DirectionHelper.FromOffset(dx, dy);
+            return;
+        }
+
+        // A* returned (0,0) but we are not adjacent — STUCK behind a creature.
+        // Try a random cardinal step to escape (TFS pushCreatures equivalent).
+        if (Chebyshev(pos.TileX, pos.TileY, targetX, targetY) > MeleeRange
+            && !pos.IsMoving)
+        {
+            TryRandomCardinalStep(ref pos, ref queue);
+        }
+    }
+
     private void UpdateIdle(
-        ref Entity entity,
-        ref CreatureComponent creature,
-        ref CreatureAiComponent ai,
-        ref PositionComponent pos,
+        ref CreatureComponent      creature,
+        ref CreatureAiComponent    ai,
+        ref PositionComponent      pos,
         ref MovementQueueComponent queue,
         float deltaTime)
     {
@@ -237,30 +279,30 @@ public sealed class CreatureAiSystem : ISystem
         if (ai.WanderCooldown > 0f) return;
 
         ai.WanderCooldown = WanderMin + (float)(_rng.NextDouble() * (WanderMax - WanderMin));
-        if (_rng.NextDouble() > 0.3) return;
+        if (_rng.NextDouble() > 0.4) return;
 
         Direction[] dirs = { Direction.North, Direction.South, Direction.East, Direction.West };
         var dir = dirs[_rng.Next(dirs.Length)];
-        var (dx, dy) = DirectionHelper.ToOffset(dir);
-        int nx = pos.TileX + dx;
-        int ny = pos.TileY + dy;
+        var (ddx, ddy) = DirectionHelper.ToOffset(dir);
+        int nx = pos.TileX + ddx;
+        int ny = pos.TileY + ddy;
 
-        if (ChebyshevDist(nx, ny, ai.SpawnX, ai.SpawnY) > 3) return;
+        if (Chebyshev(nx, ny, ai.SpawnX, ai.SpawnY) > 3) return;
         if (_mapData != null && !_mapData.Walkable[nx, ny, pos.FloorZ]) return;
 
         queue.QueuedDirection = (byte)dir;
     }
 
-    private void MoveToward(
+    private void ReturnToSpawn(
         int entityId,
-        ref CreatureAiComponent ai,
-        ref PositionComponent pos,
-        ref MovementQueueComponent queue,
-        int goalX, int goalY)
+        ref CreatureAiComponent    ai,
+        ref PositionComponent      pos,
+        ref MovementQueueComponent queue)
     {
         if (pos.IsMoving || _mapData == null) return;
 
-        if (_pathCache.TryConsume(entityId, goalX, goalY, out int dx, out int dy))
+        // PathCache is fine for return — spawn is a static goal
+        if (_pathCache.TryConsume(entityId, ai.SpawnX, ai.SpawnY, out int dx, out int dy))
         {
             if (dx != 0 || dy != 0)
                 queue.QueuedDirection = (byte)DirectionHelper.FromOffset(dx, dy);
@@ -269,16 +311,16 @@ public sealed class CreatureAiSystem : ISystem
 
         var path = AStarPathfinder.FindPath(
             pos.TileX, pos.TileY, pos.FloorZ,
-            goalX, goalY, _mapData);
+            ai.SpawnX, ai.SpawnY, _mapData);
 
-        var (fdx, fdy) = _pathCache.Store(entityId, goalX, goalY, path);
+        var (fdx, fdy) = _pathCache.Store(entityId, ai.SpawnX, ai.SpawnY, path);
         if (fdx != 0 || fdy != 0)
             queue.QueuedDirection = (byte)DirectionHelper.FromOffset(fdx, fdy);
     }
 
     private void FleeFrom(
-        ref CreatureAiComponent ai,
-        ref PositionComponent pos,
+        ref CreatureAiComponent    ai,
+        ref PositionComponent      pos,
         ref MovementQueueComponent queue,
         int threatX, int threatY)
     {
@@ -286,9 +328,8 @@ public sealed class CreatureAiSystem : ISystem
 
         int dx = pos.TileX - threatX;
         int dy = pos.TileY - threatY;
-        dx = dx == 0 ? 0 : (dx > 0 ? 1 : -1);
-        dy = dy == 0 ? 0 : (dy > 0 ? 1 : -1);
-        if (dx == 0 && dy == 0) dx = 1;
+        dx = dx == 0 ? (_rng.NextDouble() > 0.5 ? 1 : -1) : (dx > 0 ? 1 : -1);
+        dy = dy == 0 ? (_rng.NextDouble() > 0.5 ? 1 : -1) : (dy > 0 ? 1 : -1);
 
         int nx = pos.TileX + dx;
         int ny = pos.TileY + dy;
@@ -297,66 +338,73 @@ public sealed class CreatureAiSystem : ISystem
         queue.QueuedDirection = (byte)DirectionHelper.FromOffset(dx, dy);
     }
 
+    /// <summary>Random cardinal step to escape deadlock.</summary>
+    private void TryRandomCardinalStep(
+        ref PositionComponent      pos,
+        ref MovementQueueComponent queue)
+    {
+        if (_mapData == null) return;
+
+        Direction[] cards = { Direction.North, Direction.South, Direction.East, Direction.West };
+        // Fisher-Yates shuffle
+        for (int i = cards.Length - 1; i > 0; i--)
+        {
+            int j = _rng.Next(i + 1);
+            (cards[i], cards[j]) = (cards[j], cards[i]);
+        }
+
+        foreach (var dir in cards)
+        {
+            var (ddx, ddy) = DirectionHelper.ToOffset(dir);
+            int nx = pos.TileX + ddx;
+            int ny = pos.TileY + ddy;
+            if (nx < 0 || nx >= _mapData.Width || ny < 0 || ny >= _mapData.Height) continue;
+            if (!_mapData.Walkable[nx, ny, pos.FloorZ]) continue;
+            queue.QueuedDirection = (byte)dir;
+            return;
+        }
+    }
+
     private void ExecuteAttack(ref CreatureComponent creature, ref CreatureAiComponent ai)
     {
         if (!ai.TargetEntity.IsAlive()) return;
-
         if (_combatSystem != null)
-        {
             _combatSystem.ApplyCreatureAttack(ref creature, ai.TargetEntity);
-        }
         else
-        {
-            _logger.LogWarning("CombatSystem not wired – creature attack skipped.");
-        }
+            _logger.LogWarning("CombatSystem not wired — creature attack skipped.");
     }
-
-    // ── Scan helpers ──────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Finds the nearest player within <paramref name="range"/> tiles
-    /// that has an unobstructed line of sight (Task 2.6).
-    /// Falls back to ignoring LoS when no map data is available.
-    /// </summary>
-    private Entity FindNearestPlayerWithLoS(int cx, int cy, byte floor, int range)
-    {
-        Entity nearest = Entity.Null;
-        int    bestDist = int.MaxValue;
-
-        _world.World.Query(in PlayerQuery,
-            (Entity pe, ref PositionComponent ppos) =>
-            {
-                if (ppos.FloorZ != floor) return;
-                int d = ChebyshevDist(cx, cy, ppos.TileX, ppos.TileY);
-                if (d > range || d >= bestDist) return;
-
-                // Task 2.6 LoS check
-                if (_mapData != null)
-                {
-                    bool los = LosChecker.HasLineOfSight(
-                        _mapData, cx, cy, ppos.TileX, ppos.TileY, floor);
-                    if (!los) return;
-                }
-
-                nearest  = pe;
-                bestDist = d;
-            });
-
-        return nearest;
-    }
-
-    // ── Legacy fallback (kept for Chase re-acquire path) ─────────────────
-    private Entity FindNearestPlayer(int cx, int cy, byte floor, int range)
-        => FindNearestPlayerWithLoS(cx, cy, floor, range);
-
-    private static int ChebyshevDist(int x1, int y1, int x2, int y2)
-        => Math.Max(Math.Abs(x1 - x2), Math.Abs(y1 - y2));
 
     private static float AttackCooldownFor(float speed)
     {
-        // Tibia: attack speed = base 2s scaled by creature speed
-        // speed 200 = standard, lower = slower
-        float factor = speed > 0 ? 200f / speed : 1f;
-        return Math.Clamp(AttackBase * factor, 1.0f, 4.0f);
+        float factor = Math.Clamp(speed / 100f, 0.5f, 2.0f);
+        return 2.0f / factor;
+    }
+
+    private static int Chebyshev(int ax, int ay, int bx, int by)
+        => Math.Max(Math.Abs(ax - bx), Math.Abs(ay - by));
+
+    // ── Scan helpers ──────────────────────────────────────────────────────
+
+    private Entity FindNearestPlayerWithLoS(int cx, int cy, byte floor, int range)
+    {
+        Entity nearest  = Entity.Null;
+        int    bestDist = int.MaxValue;
+
+        _world.World.Query(in PlayerQuery,
+            (Entity e, ref PositionComponent ppos) =>
+            {
+                if (ppos.FloorZ != floor) return;
+                int d = Chebyshev(cx, cy, ppos.TileX, ppos.TileY);
+                if (d > range || d >= bestDist) return;
+
+                if (_mapData != null
+                    && !LosChecker.HasLineOfSight(_mapData, cx, cy, ppos.TileX, ppos.TileY, floor))
+                    return;
+
+                bestDist = d;
+                nearest  = e;
+            });
+
+        return nearest;
     }
 }
