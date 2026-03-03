@@ -1,6 +1,7 @@
 using Client.Core;
 using Client.ECS;
 using Client.ECS.Systems;
+using Client.GUI;
 using Client.Network;
 using Client.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,8 @@ services.AddSingleton<EffectRenderSystem>();
 services.AddSingleton<RenderSystem>();
 services.AddSingleton<HudSystem>();
 services.AddSingleton<MinimapSystem>();
+services.AddSingleton<GuiWindowManager>();
+services.AddSingleton<GuiSystem>();
 services.AddSingleton<GameLoop>();
 
 var provider = services.BuildServiceProvider();
