@@ -14,6 +14,7 @@ services.AddSingleton<ClientWorld>();
 services.AddSingleton<GameStateService>();
 services.AddSingleton<CameraService>();
 services.AddSingleton<SpriteService>();
+services.AddSingleton<MinimapService>();
 services.AddSingleton<ClientNetworkManager>();
 services.AddSingleton<InputSystem>();
 services.AddSingleton<InterpolationSystem>();
@@ -24,6 +25,7 @@ services.AddSingleton<CreatureRenderSystem>();
 services.AddSingleton<EffectRenderSystem>();
 services.AddSingleton<RenderSystem>();
 services.AddSingleton<HudSystem>();
+services.AddSingleton<MinimapSystem>();
 services.AddSingleton<GameLoop>();
 
 var provider = services.BuildServiceProvider();

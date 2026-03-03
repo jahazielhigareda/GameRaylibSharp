@@ -19,6 +19,7 @@ public class GameLoop
     private readonly EffectRenderSystem   _effectRenderSystem;
     private readonly RenderSystem         _renderSystem;
     private readonly HudSystem            _hudSystem;
+    private readonly MinimapSystem        _minimapSystem;
     private readonly BackgroundSystem     _backgroundSystem;
     private readonly SpriteService        _spriteService;
 
@@ -33,6 +34,7 @@ public class GameLoop
         EffectRenderSystem effectRenderSystem,
         RenderSystem renderSystem,
         HudSystem hudSystem,
+        MinimapSystem minimapSystem,
         BackgroundSystem backgroundSystem,
         SpriteService spriteService)
     {
@@ -46,6 +48,7 @@ public class GameLoop
         _effectRenderSystem   = effectRenderSystem;
         _renderSystem         = renderSystem;
         _hudSystem            = hudSystem;
+        _minimapSystem        = minimapSystem;
         _backgroundSystem     = backgroundSystem;
         _spriteService        = spriteService;
     }
@@ -86,6 +89,7 @@ public class GameLoop
             _renderSystem.Update(dt);
 
             _hudSystem.Update(dt);
+            _minimapSystem.Update(dt);
 
             Raylib.EndDrawing();
         }

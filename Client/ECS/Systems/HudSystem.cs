@@ -58,7 +58,7 @@ public class HudSystem : ISystem
             Raylib.DrawText($"Target ID: {_state.TargetedEntityId}", 10, sh - 55, 16, Raylib_cs.Color.Red);
         }
 
-        Raylib.DrawText("WASD/Arrows: Move | K: Skills | LClick: Target | RClick: Clear target", 10, sh - 30, 16, Color.LightGray);
+        Raylib.DrawText("WASD/Arrows: Move | K: Skills | M: Minimap | LClick: Target | RClick: Clear target", 10, sh - 30, 16, Color.LightGray);
     }
 
     private static void DrawStatsPanel(in StatsDataComponent stats, int sw, int sh)
