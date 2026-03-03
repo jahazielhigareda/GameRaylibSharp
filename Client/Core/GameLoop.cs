@@ -13,41 +13,50 @@ public class GameLoop
     private readonly ClientNetworkManager _network;
     private readonly InputSystem          _inputSystem;
     private readonly InterpolationSystem  _interpolationSystem;
+    private readonly AnimationSystem      _animationSystem;
     private readonly TileRenderSystem     _tileRenderSystem;
     private readonly CreatureRenderSystem _creatureRenderSystem;
     private readonly EffectRenderSystem   _effectRenderSystem;
     private readonly RenderSystem         _renderSystem;
     private readonly HudSystem            _hudSystem;
     private readonly BackgroundSystem     _backgroundSystem;
+    private readonly SpriteService        _spriteService;
 
     public GameLoop(
         ClientWorld world,
         ClientNetworkManager network,
         InputSystem inputSystem,
         InterpolationSystem interpolationSystem,
+        AnimationSystem animationSystem,
         TileRenderSystem tileRenderSystem,
         CreatureRenderSystem creatureRenderSystem,
         EffectRenderSystem effectRenderSystem,
         RenderSystem renderSystem,
         HudSystem hudSystem,
-        BackgroundSystem backgroundSystem)
+        BackgroundSystem backgroundSystem,
+        SpriteService spriteService)
     {
         _world                = world;
         _network              = network;
         _inputSystem          = inputSystem;
         _interpolationSystem  = interpolationSystem;
+        _animationSystem      = animationSystem;
         _tileRenderSystem     = tileRenderSystem;
         _creatureRenderSystem = creatureRenderSystem;
         _effectRenderSystem   = effectRenderSystem;
         _renderSystem         = renderSystem;
         _hudSystem            = hudSystem;
         _backgroundSystem     = backgroundSystem;
+        _spriteService        = spriteService;
     }
 
     public void Run()
     {
         Raylib.InitWindow(800, 600, "Game2dRaylib - Tibia Movement [Arch ECS]");
         Raylib.SetTargetFPS(Constants.TickRate);
+
+        // Sprite atlas must be generated after the window (OpenGL context) is ready
+        _spriteService.Initialize();
 
         _network.SetTileRenderSystem(_tileRenderSystem);
         _network.Connect();
@@ -59,6 +68,7 @@ public class GameLoop
             _network.PollEvents();
             _inputSystem.Update(dt);
             _interpolationSystem.Update(dt);
+            _animationSystem.Update(dt);
 
             Raylib.BeginDrawing();
             Raylib.ClearBackground(Color.Black);
@@ -81,6 +91,7 @@ public class GameLoop
         }
 
         Raylib.CloseWindow();
+        _spriteService.Dispose();
         _world.Dispose();
     }
 }

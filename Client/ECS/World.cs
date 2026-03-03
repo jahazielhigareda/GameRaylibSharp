@@ -56,6 +56,8 @@ public sealed class ClientWorld : IDisposable
                 new PositionComponent(),
                 new RenderComponent { Color = color, Size = Constants.PlayerSize },
                 new CreatureRenderOrder(),
+                new AnimationComponent(),
+                OutfitComponent.DefaultPlayer(),
                 new StatsDataComponent(),
                 new SkillsDataComponent());
         }
@@ -64,7 +66,9 @@ public sealed class ClientWorld : IDisposable
             new NetworkIdComponent { Id = networkId },
             new PositionComponent(),
             new RenderComponent { Color = color, Size = Constants.PlayerSize },
-            new CreatureRenderOrder());
+            new CreatureRenderOrder(),
+            new AnimationComponent(),
+            OutfitComponent.DefaultPlayer());
     }
 
 
@@ -86,7 +90,9 @@ public sealed class ClientWorld : IDisposable
                 new RenderComponent { Color = Raylib_cs.Color.Orange, Size = Constants.CreatureSize },
                 new CreatureRenderOrder(),
                 new CreatureClientTag(),
-                new CreatureHpComponent());
+                new CreatureHpComponent(),
+                new AnimationComponent(),
+                OutfitComponent.DefaultCreature());
         }
 
         ref var pos = ref found.Get<PositionComponent>();
