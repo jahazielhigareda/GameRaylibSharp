@@ -13,41 +13,64 @@ public class GameLoop
     private readonly ClientNetworkManager _network;
     private readonly InputSystem          _inputSystem;
     private readonly InterpolationSystem  _interpolationSystem;
+    private readonly AnimationSystem      _animationSystem;
     private readonly TileRenderSystem     _tileRenderSystem;
     private readonly CreatureRenderSystem _creatureRenderSystem;
     private readonly EffectRenderSystem   _effectRenderSystem;
     private readonly RenderSystem         _renderSystem;
     private readonly HudSystem            _hudSystem;
+    private readonly MinimapSystem        _minimapSystem;
+    private readonly GuiSystem            _guiSystem;
+    private readonly AudioSystem          _audioSystem;
     private readonly BackgroundSystem     _backgroundSystem;
+    private readonly SpriteService        _spriteService;
+    private readonly AudioService         _audioService;
 
     public GameLoop(
         ClientWorld world,
         ClientNetworkManager network,
         InputSystem inputSystem,
         InterpolationSystem interpolationSystem,
+        AnimationSystem animationSystem,
         TileRenderSystem tileRenderSystem,
         CreatureRenderSystem creatureRenderSystem,
         EffectRenderSystem effectRenderSystem,
         RenderSystem renderSystem,
         HudSystem hudSystem,
-        BackgroundSystem backgroundSystem)
+        MinimapSystem minimapSystem,
+        GuiSystem guiSystem,
+        AudioSystem audioSystem,
+        BackgroundSystem backgroundSystem,
+        SpriteService spriteService,
+        AudioService audioService)
     {
         _world                = world;
         _network              = network;
         _inputSystem          = inputSystem;
         _interpolationSystem  = interpolationSystem;
+        _animationSystem      = animationSystem;
         _tileRenderSystem     = tileRenderSystem;
         _creatureRenderSystem = creatureRenderSystem;
         _effectRenderSystem   = effectRenderSystem;
         _renderSystem         = renderSystem;
         _hudSystem            = hudSystem;
+        _minimapSystem        = minimapSystem;
+        _guiSystem            = guiSystem;
+        _audioSystem          = audioSystem;
         _backgroundSystem     = backgroundSystem;
+        _spriteService        = spriteService;
+        _audioService         = audioService;
     }
 
     public void Run()
     {
         Raylib.InitWindow(800, 600, "Game2dRaylib - Tibia Movement [Arch ECS]");
         Raylib.SetTargetFPS(Constants.TickRate);
+
+        // Sprite atlas must be generated after the window (OpenGL context) is ready
+        _spriteService.Initialize();
+        // Audio device must also be opened after the window is created
+        _audioService.Initialize();
 
         _network.SetTileRenderSystem(_tileRenderSystem);
         _network.Connect();
@@ -59,6 +82,7 @@ public class GameLoop
             _network.PollEvents();
             _inputSystem.Update(dt);
             _interpolationSystem.Update(dt);
+            _animationSystem.Update(dt);
 
             Raylib.BeginDrawing();
             Raylib.ClearBackground(Color.Black);
@@ -76,11 +100,16 @@ public class GameLoop
             _renderSystem.Update(dt);
 
             _hudSystem.Update(dt);
+            _minimapSystem.Update(dt);
+            _guiSystem.Update(dt);
+            _audioSystem.Update(dt);
 
             Raylib.EndDrawing();
         }
 
         Raylib.CloseWindow();
+        _spriteService.Dispose();
+        _audioService.Dispose();
         _world.Dispose();
     }
 }

@@ -18,12 +18,16 @@ namespace Client.ECS.Systems;
 ///   3 CREATURE    – skipped here; handled by CreatureRenderSystem
 ///   4 TOP ITEM    – trees / walls drawn as taller rectangles
 ///   5 EFFECT      – tile-bound glow overlay
+///
+/// Also notifies <see cref="MinimapService"/> when map data arrives and
+/// marks currently visible tiles as explored every frame.
 /// </summary>
 public class TileRenderSystem : ISystem
 {
     private readonly ClientWorld      _world;
     private readonly CameraService    _camera;
     private readonly GameStateService _state;
+    private readonly MinimapService   _minimap;
 
     // 2-D grid (legacy, single floor)
     private TileCell[,]? _grid;
@@ -33,11 +37,13 @@ public class TileRenderSystem : ISystem
     private TileCell[,,]? _grid3D;
     private int            _grid3DW, _grid3DH, _grid3DFloors;
 
-    public TileRenderSystem(ClientWorld world, CameraService camera, GameStateService state)
+    public TileRenderSystem(ClientWorld world, CameraService camera,
+                            GameStateService state, MinimapService minimap)
     {
-        _world  = world;
-        _camera = camera;
-        _state  = state;
+        _world   = world;
+        _camera  = camera;
+        _state   = state;
+        _minimap = minimap;
     }
 
     /// <summary>Called by ClientNetworkManager when MapData arrives (2-D compat).</summary>
@@ -46,6 +52,7 @@ public class TileRenderSystem : ISystem
         _grid  = grid;
         _gridW = grid.GetLength(0);
         _gridH = grid.GetLength(1);
+        _minimap.InitFromGrid(grid);
     }
 
     /// <summary>Called when a 3-D map grid is available.</summary>
@@ -58,6 +65,7 @@ public class TileRenderSystem : ISystem
         // Also populate the 2-D slice for compatibility
         _gridW = _grid3DW;
         _gridH = _grid3DH;
+        _minimap.InitFromGrid3D(grid, _state.CurrentFloorZ);
     }
 
     public void Update(float deltaTime)
@@ -116,6 +124,9 @@ public class TileRenderSystem : ISystem
                 DrawFallback(sx, sy, ts, tx, ty);
             }
         }
+
+        // Notify minimap which tiles became visible this frame
+        _minimap.MarkVisible(minTX, minTY, maxTX, maxTY);
     }
 
     // ── Layered draw ──────────────────────────────────────────────────────
