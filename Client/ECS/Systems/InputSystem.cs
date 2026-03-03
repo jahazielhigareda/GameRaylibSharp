@@ -1,5 +1,6 @@
 using Arch.Core;
 using Arch.Core.Extensions;
+using Client.Audio;
 using Client.ECS;
 using Client.ECS.Components;
 using Client.Network;
@@ -23,6 +24,7 @@ public class InputSystem : ISystem
     private readonly ClientWorld          _world;
     private readonly CameraService        _camera;
     private readonly GameStateService     _state;
+    private readonly AudioService         _audio;
 
     private int   _tick;
     private Direction _lastSentDirection = Direction.None;
@@ -34,12 +36,13 @@ public class InputSystem : ISystem
         .WithAll<NetworkIdComponent, PositionComponent, RenderComponent, CreatureClientTag>();
 
     public InputSystem(ClientNetworkManager network, ClientWorld world,
-                       CameraService camera, GameStateService state)
+                       CameraService camera, GameStateService state, AudioService audio)
     {
         _network = network;
         _world   = world;
         _camera  = camera;
         _state   = state;
+        _audio   = audio;
     }
 
     public void Update(float deltaTime)
@@ -99,6 +102,10 @@ public class InputSystem : ISystem
         {
             if (dir != _lastSentDirection || _repeatTimer <= 0f)
             {
+                // Play a soft click on the first step (direction change or first press)
+                if (dir != _lastSentDirection)
+                    _audio.PlaySfx(SoundId.UiClick);
+
                 SendMoveRequest(dir);
                 _repeatTimer = RepeatInterval;
             }

@@ -29,6 +29,8 @@ services.AddSingleton<HudSystem>();
 services.AddSingleton<MinimapSystem>();
 services.AddSingleton<GuiWindowManager>();
 services.AddSingleton<GuiSystem>();
+services.AddSingleton<AudioService>();
+services.AddSingleton<AudioSystem>();
 services.AddSingleton<GameLoop>();
 
 var provider = services.BuildServiceProvider();

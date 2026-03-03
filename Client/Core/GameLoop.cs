@@ -21,8 +21,10 @@ public class GameLoop
     private readonly HudSystem            _hudSystem;
     private readonly MinimapSystem        _minimapSystem;
     private readonly GuiSystem            _guiSystem;
+    private readonly AudioSystem          _audioSystem;
     private readonly BackgroundSystem     _backgroundSystem;
     private readonly SpriteService        _spriteService;
+    private readonly AudioService         _audioService;
 
     public GameLoop(
         ClientWorld world,
@@ -37,8 +39,10 @@ public class GameLoop
         HudSystem hudSystem,
         MinimapSystem minimapSystem,
         GuiSystem guiSystem,
+        AudioSystem audioSystem,
         BackgroundSystem backgroundSystem,
-        SpriteService spriteService)
+        SpriteService spriteService,
+        AudioService audioService)
     {
         _world                = world;
         _network              = network;
@@ -52,8 +56,10 @@ public class GameLoop
         _hudSystem            = hudSystem;
         _minimapSystem        = minimapSystem;
         _guiSystem            = guiSystem;
+        _audioSystem          = audioSystem;
         _backgroundSystem     = backgroundSystem;
         _spriteService        = spriteService;
+        _audioService         = audioService;
     }
 
     public void Run()
@@ -63,6 +69,8 @@ public class GameLoop
 
         // Sprite atlas must be generated after the window (OpenGL context) is ready
         _spriteService.Initialize();
+        // Audio device must also be opened after the window is created
+        _audioService.Initialize();
 
         _network.SetTileRenderSystem(_tileRenderSystem);
         _network.Connect();
@@ -94,12 +102,14 @@ public class GameLoop
             _hudSystem.Update(dt);
             _minimapSystem.Update(dt);
             _guiSystem.Update(dt);
+            _audioSystem.Update(dt);
 
             Raylib.EndDrawing();
         }
 
         Raylib.CloseWindow();
         _spriteService.Dispose();
+        _audioService.Dispose();
         _world.Dispose();
     }
 }
